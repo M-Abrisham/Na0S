@@ -33,9 +33,9 @@ def merge_datasets():
         combined.to_csv(OUTPUT_PATH, index=False)
         
         print(f"✅ Success! Merged data saved to {OUTPUT_PATH}")
-        print(f"📊 Total Rows: {len(combined)}")
-        print(f"   - Bad Examples: {len(jailbreak_df)}")
-        print(f"   - Good Examples: {len(df_good)}")
+        print(f"Total: {len(combined)}")
+        print(f"   - JAILBREAK: {len(jailbreak_df)}")
+        print(f"   - SAFE: {len(df_good)}")
 
     except Exception as e:
         print(f"❌ Error: {e}")
