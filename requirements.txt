@@ -1,3 +1,4 @@
+groq
 joblib==1.5.3
 numpy==2.0.2
 pandas==2.3.3
