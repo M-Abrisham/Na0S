@@ -5,7 +5,7 @@ from typing import Optional
 
 from groq import Groq
 
-DEAFULT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 
 @dataclass(frozen=True)
@@ -24,12 +24,12 @@ SYSTEM_PROMPT = (
 
 class LLMChecker:
     def __init__(self, api_key: Optional[str] = None):
-        resolved_key = api_key or os.getenv("GROO_API_KEY")
+        resolved_key = api_key or os.getenv("GROQ_API_KEY")
         if not resolved_key:
-            raise ValueError("GROO_API_KEY is not set and no api_key was provided.")
+            raise ValueError("GROQ_API_KEY is not set and no api_key was provided.")
         self._client = Groq(api_key=resolved_key)
 
-    def classify_prompt(self, prompt: str, model: str = DEAFULT_MODEL) -> LLMCheckResult:
+    def classify_prompt(self, prompt: str, model: str = DEFAULT_MODEL) -> LLMCheckResult:
         response = self._client.chat.completions.create(
             model=model,
             temperature=0,
@@ -50,14 +50,12 @@ def _parse_response(content: str) -> LLMCheckResult:
     if start_index != -1 and end_index != -1:
         json_str = content[start_index : end_index + 1]
     try:
-        data = json.loads(json_str)
+        data = json.loads(json_str)        
         label = str(data.get("label", "")).upper().strip() or "UNKNOWN"
         confidence = float(data.get("confidence", 0))
         rationale = str(data.get("rationale", "")).strip()
         return LLMCheckResult(label=label, confidence=confidence, rationale=rationale)
     except json.JSONDecodeError:
-        pass 
-
         label = "MALICIOUS" if "malicious" in content.lower() else "SAFE"
         return LLMCheckResult(label=label, confidence=0.0, rationale=content.strip())
     
