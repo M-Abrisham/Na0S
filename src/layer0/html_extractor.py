@@ -38,9 +38,16 @@ _HIDDEN_STYLE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# suspicious Injection keywords inside HTML comments
+# Suspicious injection PHRASES inside HTML comments.
+# Require multi-word patterns — bare "ignore" or "instruction" match too much
+# legitimate content (e.g. "ignore older browsers", "see instructions below").
 _COMMENT_KEYWORDS_RE = re.compile(
-    r"ignore|instruction|system prompt|reveal|override|bypass|exfiltrate",
+    r"ignore.{0,15}(?:instruction|previous|above|system|prompt)|"
+    r"system.{0,10}prompt|"
+    r"reveal.{0,10}(?:prompt|secret|password|key|credential)|"
+    r"override.{0,10}(?:instruction|rule|policy|filter)|"
+    r"bypass.{0,10}(?:filter|safety|security|guard|check)|"
+    r"exfiltrate",
     re.IGNORECASE,
 )
 

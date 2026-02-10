@@ -32,6 +32,19 @@ def strip_invisible_chars(text):
     return "".join(result)
 
 
+def _count_compat_chars(text):
+    """Count characters whose NFKC decomposition differs from themselves.
+
+    This per-character check avoids false positives from positional shift
+    (e.g. a ligature expanding fi→fi shifts all later positions).
+    """
+    count = 0
+    for ch in text:
+        if unicodedata.normalize("NFKC", ch) != ch:
+            count += 1
+    return count
+
+
 def normalize_text(text):
     """Run all Layer 0 normalization steps in order.
 
@@ -42,14 +55,23 @@ def normalize_text(text):
 
     # Step 1: NFKC normalization
     # Collapses fullwidth chars, ligatures, superscripts, compatibility forms
+    compat_count = _count_compat_chars(text)
     text = unicodedata.normalize("NFKC", text)
-    if len(text) != original_len:
+    # Only flag if >25% of original chars are compatibility forms — ligatures
+    # from Word, superscripts in math (x²), smart quotes are all normal.
+    # A wall of fullwidth chars (evasion) typically hits 80%+.
+    if compat_count > 0 and compat_count / max(original_len, 1) > 0.25:
         flags.append("nfkc_changed")
 
     # Step 2: Invisible character stripping
     if has_invisible_chars(text):
-        flags.append("invisible_chars_found")
+        before_strip = len(text)
         text = strip_invisible_chars(text)
+        invisible_count = before_strip - len(text)
+        # Only flag if >2 invisible chars — a single zero-width space from
+        # copy-paste is normal; a cluster of them is evasion
+        if invisible_count > 2:
+            flags.append("invisible_chars_found")
 
     # Step 3: Whitespace canonicalization
     # Replace Unicode whitespace variants with ASCII space

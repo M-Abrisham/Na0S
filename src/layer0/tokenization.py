@@ -9,9 +9,35 @@ import tiktoken
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 
 # --- Ratio thresholds ---
-GLOBAL_RATIO_THRESHOLD = 0.50
+# Start permissive — tighten based on real attacks, not guesses.
+# Normal English: ~0.25-0.35 | CJK/emoji: ~0.50-0.60 | Adversarial: ~0.80+
+GLOBAL_RATIO_THRESHOLD = 0.75
 WINDOW_SIZE = 50
-WINDOW_RATIO_THRESHOLD = 0.70
+WINDOW_RATIO_THRESHOLD = 0.85
+
+# CJK/emoji Unicode ranges — these scripts naturally have high token ratios
+_CJK_RANGES = (
+    (0x2E80, 0x9FFF),   # CJK Radicals through Unified Ideographs
+    (0xAC00, 0xD7AF),   # Hangul Syllables
+    (0xF900, 0xFAFF),   # CJK Compatibility Ideographs
+    (0x1F300, 0x1FAFF), # Emoji
+    (0x20000, 0x2FA1F), # CJK Extension B+
+)
+
+
+def _is_high_token_script(text):
+    """Check if text is predominantly CJK/emoji — these have inherently
+    high token ratios and should not trigger tokenization_spike."""
+    if not text:
+        return False
+    high_count = 0
+    for ch in text:
+        cp = ord(ch)
+        for lo, hi in _CJK_RANGES:
+            if lo <= cp <= hi:
+                high_count += 1
+                break
+    return high_count / len(text) > 0.3
 
 # Strip everything except lowercase alphanumeric + spaces for normalized hash
 _NORMALIZE_RE = re.compile(r"[^a-z0-9 ]")
@@ -199,13 +225,13 @@ def check_tokenization_anomaly(text):
     store_flags = store.check(fp)
     flags.extend(store_flags)
 
-    # Check 2: global ratio
-    if fp["ratio"] >= GLOBAL_RATIO_THRESHOLD:
+    # Check 2: global ratio (skip for CJK/emoji — they naturally tokenize high)
+    if fp["ratio"] >= GLOBAL_RATIO_THRESHOLD and not _is_high_token_script(text):
         flags.append("tokenization_spike")
 
     # Check 3: sliding window for localized anomalies
     char_count = fp["char_count"]
-    if char_count > WINDOW_SIZE:
+    if char_count > WINDOW_SIZE and not _is_high_token_script(text):
         for start in range(0, char_count - WINDOW_SIZE + 1, WINDOW_SIZE):
             window = text[start : start + WINDOW_SIZE]
             w_tokens = len(_ENCODER.encode(window))
