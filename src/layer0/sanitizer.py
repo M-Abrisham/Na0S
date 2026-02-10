@@ -1,5 +1,6 @@
 from .result import Layer0Result
 from .validation import validate_input
+from .encoding import decode_to_str
 from .normalization import normalize_text
 from .html_extractor import extract_safe_text
 from .tokenization import check_tokenization_anomaly
@@ -9,19 +10,27 @@ def layer0_sanitize(raw_input):
     """Main Layer 0 entry point. Every input must pass through here first.
 
     Processing order:
+        0. Encoding detection (bytes → str via chardet, never assume UTF-8)
         1. Fail-fast validation (type, empty, size)
         2. Unicode normalization (NFKC + invisible chars + whitespace)
         3. HTML safe extraction (strip tags, detect hidden content)
 
     Returns a Layer0Result with sanitized text and metadata.
     """
+    all_flags = []
+
+    # Step 0: Encoding detection — decode bytes before anything else
+    if isinstance(raw_input, (bytes, bytearray)):
+        raw_input, encoding_used, enc_flags = decode_to_str(raw_input)
+        all_flags.extend(enc_flags)
+
     # Step 1: Fail-fast validation
     rejection = validate_input(raw_input)
     if rejection is not None:
+        rejection.anomaly_flags = all_flags + rejection.anomaly_flags
         return rejection
 
     original_length = len(raw_input)
-    all_flags = []
 
     # Step 2: Normalization
     text, chars_stripped, norm_flags = normalize_text(raw_input)
