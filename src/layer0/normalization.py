@@ -2,13 +2,19 @@ import re
 import unicodedata
 
 # Unicode whitespace variants that should become plain ASCII space.
-# Does NOT include \n, \r, \t — those are preserved.
+# Does NOT include \n, \r, \t — those are handled separately.
 _UNICODE_WHITESPACE_RE = re.compile(
-    "[\u00a0\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]"
+    "[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff\x0b\x0c]"
 )
 
 # Collapse runs of multiple ASCII spaces into one
 _MULTI_SPACE_RE = re.compile(r" {2,}")
+
+# Collapse 3+ consecutive newlines into 2 (preserves paragraph breaks)
+_EXCESSIVE_NEWLINES_RE = re.compile(r"\n{3,}")
+
+# Collapse 3+ consecutive tabs into 1
+_EXCESSIVE_TABS_RE = re.compile(r"\t{3,}")
 
 
 def has_invisible_chars(text):
@@ -82,6 +88,10 @@ def normalize_text(text):
 
     # Collapse multiple spaces into one, strip leading/trailing
     text = _MULTI_SPACE_RE.sub(" ", text).strip()
+
+    # Collapse excessive newlines and tabs (prevents padding attacks)
+    text = _EXCESSIVE_NEWLINES_RE.sub("\n\n", text)
+    text = _EXCESSIVE_TABS_RE.sub("\t", text)
 
     chars_stripped = original_len - len(text)
     return text, chars_stripped, flags
