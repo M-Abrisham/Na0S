@@ -9,6 +9,10 @@ class Rule:
     technique_ids: list = field(default_factory=list)
     severity: str = "medium"
     description: str = ""
+    _compiled: re.Pattern = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        self._compiled = re.compile(self.pattern, re.IGNORECASE)
 
 
 @dataclass
@@ -49,20 +53,18 @@ RULES = [
 
 def rule_score(text):
     """Return list of matched rule names (backward-compatible)."""
-    t = text.lower()
     hits = []
     for rule in RULES:
-        if re.search(rule.pattern, t):
+        if rule._compiled.search(text):
             hits.append(rule.name)
     return hits
 
 
 def rule_score_detailed(text):
     """Return list of RuleHit objects with technique_ids and severity."""
-    t = text.lower()
     hits = []
     for rule in RULES:
-        if re.search(rule.pattern, t):
+        if rule._compiled.search(text):
             hits.append(RuleHit(
                 name=rule.name,
                 technique_ids=rule.technique_ids,
