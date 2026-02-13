@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import time
 
 import tiktoken
@@ -74,42 +75,127 @@ def _compute_fingerprint(text):
 class FingerprintStore:
     """Persistent store of known-malicious input fingerprints.
 
-    Stores three hash indices for different matching strategies:
-        content_hashes    — exact text match
-        normalized_hashes — case/punctuation-insensitive match
-        token_hashes      — BPE token-sequence match
+    Uses SQLite with WAL mode for ACID-safe concurrent access.
+    Stores three hash columns (content, normalized, token) in a single
+    indexed table.  Auto-prunes entries older than TTL_DAYS and enforces
+    a MAX_ENTRIES cap using LRU eviction.
 
     Each entry tracks hit_count and last_seen for monitoring.
     """
 
     _DEFAULT_PATH = os.path.join(
-        os.path.dirname(__file__), "..", "..", "data", "fingerprints.json"
+        os.path.dirname(__file__), "..", "..", "data", "fingerprints.db"
     )
+
+    TTL_DAYS = 90
+    MAX_ENTRIES = 50_000
 
     def __init__(self, store_path=None):
         self._path = os.path.normpath(
             store_path or os.getenv("L0_FINGERPRINT_STORE", self._DEFAULT_PATH)
         )
-        self._store = self._load()
+        self._init_db()
+        self._migrate_json()
+        self._prune()
 
-    def _load(self):
-        if not os.path.exists(self._path):
-            return {
-                "content_hashes": {},
-                "normalized_hashes": {},
-                "token_hashes": {},
-            }
-        with open(self._path, "r") as f:
-            data = json.load(f)
-        # Migrate older stores that lack normalized_hashes
-        if "normalized_hashes" not in data:
-            data["normalized_hashes"] = {}
-        return data
-
-    def _save(self):
+    def _init_db(self):
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        with open(self._path, "w") as f:
-            json.dump(self._store, f, indent=2)
+        self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS fingerprints (
+                content_hash    TEXT PRIMARY KEY,
+                normalized_hash TEXT,
+                token_hash      TEXT,
+                label           TEXT,
+                ratio           REAL,
+                preview         TEXT,
+                hit_count       INTEGER DEFAULT 0,
+                first_seen      REAL,
+                last_seen       REAL
+            )
+        """)
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_normalized
+            ON fingerprints(normalized_hash)
+        """)
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_token
+            ON fingerprints(token_hash)
+        """)
+        self._conn.commit()
+
+    def _migrate_json(self):
+        """One-time migration: import entries from the old JSON store."""
+        json_path = self._path.replace(".db", ".json")
+        if not os.path.exists(json_path):
+            return
+        # Only migrate if the DB is empty
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM fingerprints"
+        ).fetchone()
+        if row[0] > 0:
+            return
+        with open(json_path, "r") as f:
+            data = json.load(f)
+        content = data.get("content_hashes", {})
+        normalized = data.get("normalized_hashes", {})
+        token = data.get("token_hashes", {})
+        # Build a map: preview → (content_hash, normalized_hash, token_hash, entry)
+        # Match entries across the three dicts by preview text
+        entries = {}
+        for h, e in content.items():
+            key = e.get("preview", "")
+            entries[key] = {"content_hash": h, **e}
+        for h, e in normalized.items():
+            key = e.get("preview", "")
+            if key in entries:
+                entries[key]["normalized_hash"] = h
+        for h, e in token.items():
+            key = e.get("preview", "")
+            if key in entries:
+                entries[key]["token_hash"] = h
+        for e in entries.values():
+            self._conn.execute(
+                """INSERT OR IGNORE INTO fingerprints
+                   (content_hash, normalized_hash, token_hash,
+                    label, ratio, preview, hit_count, first_seen, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    e.get("content_hash", ""),
+                    e.get("normalized_hash", ""),
+                    e.get("token_hash", ""),
+                    e.get("label", "malicious"),
+                    e.get("ratio", 0.0),
+                    e.get("preview", ""),
+                    e.get("hit_count", 0),
+                    e.get("first_seen", 0.0),
+                    e.get("last_seen", 0.0),
+                ),
+            )
+        self._conn.commit()
+
+    def _prune(self):
+        """Remove stale entries (TTL) and enforce max-size cap (LRU)."""
+        cutoff = time.time() - (self.TTL_DAYS * 86400)
+        self._conn.execute(
+            "DELETE FROM fingerprints WHERE last_seen < ?", (cutoff,)
+        )
+        count = self._conn.execute(
+            "SELECT COUNT(*) FROM fingerprints"
+        ).fetchone()[0]
+        if count > self.MAX_ENTRIES:
+            self._conn.execute(
+                """DELETE FROM fingerprints
+                   WHERE content_hash NOT IN (
+                       SELECT content_hash FROM fingerprints
+                       ORDER BY hit_count DESC, last_seen DESC
+                       LIMIT ?
+                   )""",
+                (self.MAX_ENTRIES,),
+            )
+        self._conn.commit()
 
     def register(self, text, label="malicious"):
         """Add a confirmed-malicious input to the store.
@@ -120,24 +206,24 @@ class FingerprintStore:
         """
         fp = _compute_fingerprint(text)
         now = time.time()
-        entry = {
-            "label": label,
-            "ratio": fp["ratio"],
-            "preview": text[:80],
-            "hit_count": 0,
-            "first_seen": now,
-            "last_seen": now,
-        }
-
-        for key in ("content_hashes", "normalized_hashes", "token_hashes"):
-            hash_field = key.replace("_hashes", "_hash")
-            hash_val = fp[hash_field]
-            if hash_val in self._store[key]:
-                # Already registered — don't reset counters
-                continue
-            self._store[key][hash_val] = dict(entry)
-
-        self._save()
+        self._conn.execute(
+            """INSERT INTO fingerprints
+               (content_hash, normalized_hash, token_hash,
+                label, ratio, preview, hit_count, first_seen, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+               ON CONFLICT(content_hash) DO NOTHING""",
+            (
+                fp["content_hash"],
+                fp["normalized_hash"],
+                fp["token_hash"],
+                label,
+                fp["ratio"],
+                text[:80],
+                now,
+                now,
+            ),
+        )
+        self._conn.commit()
         return fp
 
     def check(self, fingerprint):
@@ -148,40 +234,44 @@ class FingerprintStore:
         """
         flags = []
         now = time.time()
-        hit = False
 
         checks = [
-            ("content_hash", "content_hashes", "known_malicious_exact"),
-            ("normalized_hash", "normalized_hashes", "known_malicious_normalized"),
-            ("token_hash", "token_hashes", "known_malicious_token_pattern"),
+            ("content_hash", "content_hash", "known_malicious_exact"),
+            ("normalized_hash", "normalized_hash", "known_malicious_normalized"),
+            ("token_hash", "token_hash", "known_malicious_token_pattern"),
         ]
 
-        for hash_field, store_key, flag_name in checks:
-            hash_val = fingerprint.get(hash_field, "")
-            if hash_val in self._store.get(store_key, {}):
+        for fp_key, col, flag_name in checks:
+            hash_val = fingerprint.get(fp_key, "")
+            if not hash_val:
+                continue
+            row = self._conn.execute(
+                "SELECT 1 FROM fingerprints WHERE {} = ? LIMIT 1".format(col),
+                (hash_val,),
+            ).fetchone()
+            if row:
                 flags.append(flag_name)
-                self._store[store_key][hash_val]["hit_count"] = (
-                    self._store[store_key][hash_val].get("hit_count", 0) + 1
+                self._conn.execute(
+                    """UPDATE fingerprints
+                       SET hit_count = hit_count + 1, last_seen = ?
+                       WHERE {} = ?""".format(col),
+                    (now, hash_val),
                 )
-                self._store[store_key][hash_val]["last_seen"] = now
-                hit = True
 
-        if hit:
-            self._save()
+        if flags:
+            self._conn.commit()
 
         return flags
 
     def stats(self):
         """Return summary stats for monitoring."""
+        row = self._conn.execute(
+            """SELECT COUNT(*), COALESCE(SUM(hit_count), 0)
+               FROM fingerprints"""
+        ).fetchone()
         return {
-            "exact_entries": len(self._store["content_hashes"]),
-            "normalized_entries": len(self._store["normalized_hashes"]),
-            "token_entries": len(self._store["token_hashes"]),
-            "total_hits": sum(
-                e.get("hit_count", 0)
-                for section in self._store.values()
-                for e in section.values()
-            ),
+            "entries": row[0],
+            "total_hits": row[1],
         }
 
 

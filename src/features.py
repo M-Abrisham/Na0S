@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-import pickle
+from safe_pickle import safe_dump
 
 # Paths
 INPUT_PATH = "data/processed/combined_data.csv"
@@ -25,15 +25,11 @@ def load_training_data():
 
 # Save VECTORIZER_Path data
     print(f"Saving vectorizer to {VECTORIZER_PATH}...")
-    pkl_File = open(VECTORIZER_PATH, "wb")
-    pickle.dump(vec, pkl_File)
-    pkl_File.close()
+    safe_dump(vec, VECTORIZER_PATH)
 
- # Save FEATURES_PATH data  
+ # Save FEATURES_PATH data
     print(f"Saving features to {FEATURES_PATH}...")
-    pkl_File = open(FEATURES_PATH, "wb")
-    pickle.dump((X, y), pkl_File)
-    pkl_File.close()
+    safe_dump((X, y), FEATURES_PATH)
 
 
     print(f"✅Successfully created! Shape: {X.shape}")

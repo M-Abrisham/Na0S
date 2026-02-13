@@ -1,8 +1,8 @@
     #Train the Model
-import pickle
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report
+from safe_pickle import safe_load, safe_dump
 
 FEATURES_PATH = "data/processed/features.pkl"
 MODEL_PATH = "data/processed/model.pkl"
@@ -10,10 +10,8 @@ MODEL_PATH = "data/processed/model.pkl"
 def train_model():
     print(" Training...")
 
-    # load Binary data
-    pkl_File = open(FEATURES_PATH, "rb")
-    X, y = pickle.load(pkl_File)
-    pkl_File.close()
+    # load Binary data (integrity-checked)
+    X, y = safe_load(FEATURES_PATH)
 
 
     # Split data: Test + Training 
@@ -32,9 +30,7 @@ def train_model():
     
 
     # Save model
-    pkl_File = open(MODEL_PATH, "wb")
-    pickle.dump(clf, pkl_File)
-    pkl_File.close()
+    safe_dump(clf, MODEL_PATH)
 
     print("✅ Classifier is Successfully trained and saved")
 

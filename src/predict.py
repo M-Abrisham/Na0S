@@ -1,22 +1,15 @@
-import pickle
-
 from layer0 import layer0_sanitize, register_malicious
 from rules import rule_score, rule_score_detailed
 from scan_result import ScanResult
+from safe_pickle import safe_load
 
 MODEL_PATH = "data/processed/model.pkl"
 VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
 
 
 def predict_prompt():
-    pkl_File = open(VECTORIZER_PATH, "rb")
-    vectorizer = pickle.load(pkl_File)
-    pkl_File.close()
-
-    pkl_File = open(MODEL_PATH, "rb")
-    model = pickle.load(pkl_File)
-    pkl_File.close()
-
+    vectorizer = safe_load(VECTORIZER_PATH)
+    model = safe_load(MODEL_PATH)
     return vectorizer, model
 
 
