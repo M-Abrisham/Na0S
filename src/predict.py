@@ -1,4 +1,5 @@
 from layer0 import layer0_sanitize, register_malicious
+from obfuscation import obfuscation_scan
 from rules import rule_score, rule_score_detailed
 from scan_result import ScanResult
 from safe_pickle import safe_load
@@ -40,6 +41,19 @@ def classify_prompt(text, vectorizer, model):
         return label, prob, [], l0
 
     hits = rule_score(text)
+
+    # Obfuscation scan — detect encoded payloads and classify decoded views
+    clean = l0.sanitized_text
+    obs = obfuscation_scan(clean)
+    if obs["evasion_flags"]:
+        hits.extend(obs["evasion_flags"])
+
+    # Classify each decoded view — a base64-encoded attack should still be caught
+    for decoded in obs["decoded_views"]:
+        X = vectorizer.transform([decoded])
+        if model.predict(X)[0] == 1:
+            label = "🚨 MALICIOUS"
+            break
 
     if hits:
         label = "🚨 MALICIOUS"
@@ -86,7 +100,7 @@ def scan(text, vectorizer=None, model=None):
     for rh in detailed_hits:
         technique_tags.extend(rh.technique_ids)
 
-    # Map L0 anomaly flags to technique_ids
+    # Map L0 anomaly flags and obfuscation flags to technique_ids
     _L0_FLAG_MAP = {
         "nfkc_changed": "D5",
         "zero_width_stripped": "D5.2",
@@ -95,8 +109,14 @@ def scan(text, vectorizer=None, model=None):
         "known_malicious_exact": "D1",
         "known_malicious_normalized": "D1",
         "known_malicious_token_pattern": "D1",
+        "base64": "D4.1",
+        "url_encoded": "D4.2",
+        "hex": "D4.3",
+        "high_entropy": "D4",
+        "punctuation_flood": "D4",
+        "weird_casing": "D4",
     }
-    for flag in l0.anomaly_flags:
+    for flag in list(l0.anomaly_flags) + hits:
         mapped = _L0_FLAG_MAP.get(flag)
         if mapped and mapped not in technique_tags:
             technique_tags.append(mapped)
