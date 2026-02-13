@@ -1,30 +1,44 @@
 """MISP tag loading and aggregation helpers."""
 
 import os
+import threading
+from pathlib import Path
 
-_TAGS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "data", "tags.misp.tsv",
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_TAGS_PATH = Path(
+    os.environ.get("TAGS_MISP_PATH", _PROJECT_ROOT / "data" / "tags.misp.tsv")
 )
 
 _tag_cache = None
+_tag_lock = threading.Lock()
 
 
 def load_tags():
-    """Load data/tags.misp.tsv into a dict {tag: description}."""
+    """Load data/tags.misp.tsv into a dict {tag: description} (thread-safe)."""
     global _tag_cache
     if _tag_cache is not None:
         return _tag_cache
-    _tag_cache = {}
-    with open(_TAGS_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t", 1)
-            if len(parts) == 2:
-                _tag_cache[parts[0]] = parts[1]
+    with _tag_lock:
+        if _tag_cache is not None:
+            return _tag_cache
+        result = {}
+        with _TAGS_PATH.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t", 1)
+                if len(parts) == 2:
+                    result[parts[0]] = parts[1]
+        _tag_cache = result
     return _tag_cache
+
+
+def clear_tag_cache():
+    """Reset cached tag data (for tests and live-reload)."""
+    global _tag_cache
+    with _tag_lock:
+        _tag_cache = None
 
 
 def aggregate_by_taxonomy(probe_results, namespace):

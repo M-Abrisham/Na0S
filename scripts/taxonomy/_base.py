@@ -1,22 +1,116 @@
 """Base class for all taxonomy probes."""
 
-import yaml
 import os
+import re
+import threading
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
 
-_TAXONOMY_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "..", "..", "data", "taxonomy.yaml",
+import yaml
+
+
+@dataclass
+class ClassifierOutput:
+    """Structured output contract for classify_fn.
+
+    Every classifier (rule engine, ML model, Llama, HF pipeline) must
+    return this so evaluate() never breaks on format drift.
+    """
+    label: str
+    confidence: float
+    hits: list = field(default_factory=list)
+    rejected: bool = False
+    anomaly_flags: list = field(default_factory=list)
+
+    @classmethod
+    def from_tuple(cls, tup):
+        """Wrap a legacy (label, prob, hits, l0) tuple."""
+        if not isinstance(tup, (list, tuple)) or len(tup) != 4:
+            raise TypeError(
+                "classify_fn must return (label, prob, hits, l0) or "
+                "ClassifierOutput, got {!r}".format(type(tup).__name__)
+            )
+        label, prob, hits, l0 = tup
+        return cls(
+            label=label,
+            confidence=prob,
+            hits=hits if hits else [],
+            rejected=getattr(l0, "rejected", False) if l0 is not None else False,
+            anomaly_flags=list(getattr(l0, "anomaly_flags", [])) if l0 is not None else [],
+        )
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_TAXONOMY_PATH = Path(
+    os.environ.get("TAXONOMY_YAML_PATH", _PROJECT_ROOT / "data" / "taxonomy.yaml")
 )
 
+# Detection labels — single source of truth for label matching
+DETECTION_LABELS = frozenset({"MALICIOUS", "BLOCKED"})
+
+_STRIP_NON_ALPHA = re.compile(r"[^\w\s]")
+
+_L0_FLAG_MAP = {
+    "nfkc_changed": "D5", "zero_width_stripped": "D5.2",
+    "hidden_html_content": "I2", "high_compression_ratio": "D8",
+    "known_malicious_exact": "D1", "known_malicious_normalized": "D1",
+    "known_malicious_token_pattern": "D1",
+    "base64": "D4.1", "url_encoded": "D4.2", "hex": "D4.3",
+    "high_entropy": "D4", "punctuation_flood": "D4",
+    "weird_casing": "D4",
+}
+
+
+def _is_detected_label(label):
+    """Check if label indicates a malicious/blocked detection.
+
+    Strips emojis and punctuation, then does exact word matching
+    against DETECTION_LABELS.  This avoids substring false positives
+    like 'NOT_MALICIOUS' matching 'MALICIOUS'.
+    """
+    words = set(_STRIP_NON_ALPHA.sub("", label).upper().split())
+    return bool(words & DETECTION_LABELS)
+
+
 _taxonomy_cache = None
+_taxonomy_lock = threading.Lock()
 
 
 def _load_taxonomy():
+    """Load and cache taxonomy YAML (thread-safe, double-checked locking)."""
     global _taxonomy_cache
-    if _taxonomy_cache is None:
-        with open(_TAXONOMY_PATH, "r") as f:
-            _taxonomy_cache = yaml.safe_load(f)
+    # Fast path — no lock needed when already cached
+    if _taxonomy_cache is not None:
+        return _taxonomy_cache
+    # Slow path — only the first thread parses YAML
+    with _taxonomy_lock:
+        if _taxonomy_cache is not None:
+            return _taxonomy_cache
+        path = _TAXONOMY_PATH
+        if not path.exists():
+            raise FileNotFoundError(
+                "Taxonomy file not found: {}".format(path)
+            )
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (yaml.YAMLError, UnicodeDecodeError) as exc:
+            raise ValueError(
+                "Cannot read taxonomy YAML ({}): {}".format(path, exc)
+            ) from exc
+        if not isinstance(data, dict) or "categories" not in data:
+            raise ValueError(
+                "Taxonomy YAML missing 'categories' key: {}".format(path)
+            )
+        _taxonomy_cache = data
     return _taxonomy_cache
+
+
+def clear_taxonomy_cache():
+    """Reset cached taxonomy data (for tests and live-reload)."""
+    global _taxonomy_cache
+    with _taxonomy_lock:
+        _taxonomy_cache = None
 
 
 class Probe:
@@ -30,8 +124,18 @@ class Probe:
     category_id = ""  # e.g. "D1", "E", "T"
 
     def __init__(self):
+        if not self.category_id:
+            raise ValueError(
+                "{} must set category_id".format(type(self).__name__)
+            )
         tax = _load_taxonomy()
-        cat = tax["categories"].get(self.category_id, {})
+        cat = tax["categories"].get(self.category_id)
+        if cat is None:
+            available = ", ".join(sorted(tax["categories"].keys()))
+            raise KeyError(
+                "category_id '{}' not found in taxonomy. "
+                "Available: {}".format(self.category_id, available)
+            )
         self.name = cat.get("name", "")
         self.tags = cat.get("tags", [])
         self.severity = cat.get("severity", "")
@@ -42,43 +146,177 @@ class Probe:
         """Return list of (text, technique_id) tuples."""
         raise NotImplementedError
 
-    def evaluate(self, classify_fn):
+    def _validated_samples(self):
+        """Call generate() and validate its return structure."""
+        samples = self.generate()
+        probe_name = type(self).__name__
+        if not isinstance(samples, (list, tuple)):
+            raise TypeError(
+                "{}.generate() must return a list of (text, technique_id) "
+                "tuples, got {}".format(probe_name, type(samples).__name__)
+            )
+        for i, item in enumerate(samples):
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise TypeError(
+                    "{}.generate() item [{}] must be a (text, technique_id) "
+                    "pair, got {!r}".format(probe_name, i, item)
+                )
+            text, tech_id = item
+            if not isinstance(text, str):
+                raise TypeError(
+                    "{}.generate() item [{}]: text must be str, "
+                    "got {}".format(probe_name, i, type(text).__name__)
+                )
+            if not isinstance(tech_id, str):
+                raise TypeError(
+                    "{}.generate() item [{}]: technique_id must be str, "
+                    "got {}".format(probe_name, i, type(tech_id).__name__)
+                )
+        return samples
+
+    _rule_map = None  # cached {rule_name: [technique_ids]}
+
+    @classmethod
+    def _resolve_techniques(cls, output):
+        """Extract attributed technique IDs from a ClassifierOutput.
+
+        Returns a set of technique ID strings the detector *claims*
+        were present.  This mirrors the resolution logic in scan()
+        but is self-contained to avoid circular imports.
+        """
+        if cls._rule_map is None:
+            from src.rules import RULES      # late import — avoids circular deps
+            cls._rule_map = {r.name: r.technique_ids for r in RULES}
+        techniques = set()
+        for name in output.hits:
+            techniques.update(cls._rule_map.get(name, []))
+        for flag in output.anomaly_flags:
+            mapped = _L0_FLAG_MAP.get(flag)
+            if mapped:
+                techniques.add(mapped)
+        return techniques
+
+    def evaluate(self, classify_fn, confidence_threshold=0.0):
         """Run all samples through the detector.
 
+        Classifies every sample once and stores per-sample scores so
+        metrics can be recomputed at any threshold via
+        ``recall_at_threshold()`` without re-running the classifier.
+
+        Each sample tracks two independent booleans:
+        - **flagged**: the detector said "malicious" (detection recall)
+        - **attributed**: the detector identified the correct technique
+          (attribution accuracy)
+
         Args:
-            classify_fn: callable(text) -> (label, prob, hits, l0)
-                where label is a string, prob a float, hits a list,
-                and l0 is Layer0Result.
+            classify_fn: callable(text) -> ClassifierOutput or
+                (label, prob, hits, l0) tuple (legacy).
+            confidence_threshold: minimum prob to count as detected
+                (default 0.0 = any confidence counts).
 
         Returns:
-            dict with per-probe and per-technique recall.
+            dict with per-probe and per-technique recall, plus a
+            ``scores`` list of per-sample dicts for threshold tuning.
         """
-        samples = self.generate()
+        samples = self._validated_samples()
+        scores = []
+
+        for text, tech_id in samples:
+            raw = classify_fn(text)
+            output = raw if isinstance(raw, ClassifierOutput) else ClassifierOutput.from_tuple(raw)
+            flagged = output.rejected or _is_detected_label(output.label)
+            attributed_ids = self._resolve_techniques(output)
+            scores.append({
+                "text": text[:200],
+                "technique_id": tech_id,
+                "confidence": output.confidence,
+                "flagged": flagged,
+                "attributed": tech_id in attributed_ids,
+                "attributed_ids": sorted(attributed_ids),
+            })
+
+        tax = _load_taxonomy()
         results = {
             "probe": self.category_id,
             "name": self.name,
+            "severity": self.severity,
             "tags": self.tags,
-            "total": len(samples),
-            "detected": 0,
-            "missed": 0,
-            "by_technique": {},
-            "missed_samples": [],
+            "total": len(scores),
+            "scores": scores,
+            "meta": {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "confidence_threshold": confidence_threshold,
+                "taxonomy_version": tax.get("version", "unknown"),
+            },
         }
-        for text, tech_id in samples:
-            label, prob, hits, l0 = classify_fn(text)
-            is_detected = l0.rejected or ("SAFE" not in label.upper())
-
-            if tech_id not in results["by_technique"]:
-                results["by_technique"][tech_id] = {"detected": 0, "missed": 0}
-
-            if is_detected:
-                results["detected"] += 1
-                results["by_technique"][tech_id]["detected"] += 1
-            else:
-                results["missed"] += 1
-                results["by_technique"][tech_id]["missed"] += 1
-                results["missed_samples"].append((text[:200], tech_id, prob))
-
-        total = results["total"]
-        results["recall"] = results["detected"] / total if total else 0.0
+        results.update(recall_at_threshold(results, confidence_threshold))
         return results
+
+
+def recall_at_threshold(results, threshold=0.0):
+    """Compute recall metrics from stored scores at any threshold.
+
+    Can be called repeatedly on the same results dict to sweep
+    thresholds without re-running the classifier.
+
+    Reports:
+    - **detection rate**: flagged as malicious (any technique)
+    - **attribution accuracy**: correct technique identified (top-1
+      exact match *and* top-k set membership are equivalent here
+      because rule-based detection has no ranked output — all
+      matching rules fire equally)
+    - **confusion**: when expected T_x but detector attributed T_y,
+      ``confusion[T_x][T_y]`` counts how often that happened
+
+    Returns a dict ready to merge into the results dict.
+    """
+    detected = 0
+    missed = 0
+    attributed = 0
+    by_technique = {}
+    missed_samples = []
+    confusion = {}  # {expected_id: {attributed_id: count}}
+
+    for s in results["scores"]:
+        tech_id = s["technique_id"]
+        is_detected = s["flagged"] and s["confidence"] >= threshold
+        is_attributed = is_detected and s.get("attributed", False)
+        attr_ids = s.get("attributed_ids", [])
+
+        if tech_id not in by_technique:
+            by_technique[tech_id] = {"detected": 0, "missed": 0, "attributed": 0}
+
+        if is_detected:
+            detected += 1
+            by_technique[tech_id]["detected"] += 1
+            # Build confusion: record every attributed technique
+            if tech_id not in confusion:
+                confusion[tech_id] = {}
+            if attr_ids:
+                for aid in attr_ids:
+                    confusion[tech_id][aid] = confusion[tech_id].get(aid, 0) + 1
+            else:
+                # Flagged but no technique attributed (ML-only detection)
+                confusion[tech_id]["_none"] = confusion[tech_id].get("_none", 0) + 1
+        else:
+            missed += 1
+            by_technique[tech_id]["missed"] += 1
+            missed_samples.append(
+                (s["text"], tech_id, s["confidence"])
+            )
+
+        if is_attributed:
+            attributed += 1
+            by_technique[tech_id]["attributed"] += 1
+
+    total = results["total"]
+    return {
+        "detected": detected,
+        "missed": missed,
+        "attributed": attributed,
+        "recall": detected / total if total else 0.0,
+        "attribution_rate": attributed / detected if detected else 0.0,
+        "by_technique": by_technique,
+        "confusion": confusion,
+        "missed_samples": missed_samples,
+    }
