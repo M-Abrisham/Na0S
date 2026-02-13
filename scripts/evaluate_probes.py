@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(_project_root, "src"))
 
 from taxonomy import ALL_PROBES
 from taxonomy._buffs import ALL_BUFFS
-from taxonomy._tags import aggregate_by_taxonomy
+from taxonomy._tags import aggregate_by_taxonomy, summarize_groups
 
 
 def _load_classifier():
@@ -82,17 +82,24 @@ def _print_taxonomy_report(results, namespace, label):
         print("\nNo tags found for namespace '{}'".format(namespace))
         return
 
+    summary = summarize_groups(groups, namespace)
+
     print("\n{}:".format(label))
-    print("{:<35s} {:>7s} {:>7s} {:>8s}  {}".format(
-        "Tag", "Det", "Total", "Recall", "Probes"))
-    print("-" * 80)
+    print("{:<35s} {:>7s} {:>7s} {:>7s} {:>8s} {:>8s}  {}".format(
+        "Tag", "Det", "Attr", "Total", "Recall", "Attr%", "Probes"))
+    print("-" * 96)
     for tag in sorted(groups):
         g = groups[tag]
-        print("{:<35s} {:>7d} {:>7d} {:>7.1f}%  {}".format(
+        print("{:<35s} {:>7d} {:>7d} {:>7d} {:>7.1f}% {:>7.1f}%  {}".format(
             tag.split(":")[-1][:35],
-            g["detected"], g["total"],
-            g["recall"] * 100,
+            g["detected"], g["attributed"], g["total"],
+            g["recall"] * 100, g["attribution_rate"] * 100,
             ", ".join(g["probes"])))
+    print("-" * 96)
+    print("{:<35s} {:>7d} {:>7d} {:>7d} {:>7.1f}% {:>7.1f}%".format(
+        "TOTAL", summary["detected"], summary["attributed"],
+        summary["total"], summary["recall"] * 100,
+        summary["attribution_rate"] * 100))
 
 
 def _run_buff_matrix(classify_fn, seed, num_probes, max_samples):
