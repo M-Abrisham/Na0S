@@ -37,7 +37,7 @@ def merge_datasets():
         print(f"   - JAILBREAK: {len(jailbreak_df)}")
         print(f"   - SAFE: {len(df_good)}")
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
         print(f"❌ Error: {e}")
 
 if __name__ == "__main__":

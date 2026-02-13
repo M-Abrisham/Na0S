@@ -1,3 +1,5 @@
+import sqlite3
+
 from layer0 import layer0_sanitize, register_malicious
 from obfuscation import obfuscation_scan
 from rules import rule_score, rule_score_detailed
@@ -62,7 +64,7 @@ def classify_prompt(text, vectorizer, model):
     if "MALICIOUS" in label and hits:
         try:
             register_malicious(text)
-        except Exception:
+        except (sqlite3.Error, OSError):
             pass  # non-critical — don't break classification
 
     return label, prob, hits, l0

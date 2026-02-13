@@ -18,7 +18,7 @@ def download_data(url, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         df.to_csv(path, index=False)
         return len(df)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"❌ Error: {e}")
         return 0
 
