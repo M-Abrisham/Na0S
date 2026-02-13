@@ -1,0 +1,103 @@
+# Dataset Registry — declarative config for all training data sources.
+# Used by: scripts/sync_datasets.py
+#
+# To add a new dataset, add an entry here and run sync_datasets.py.
+# The sync script reads this file, downloads/updates each source,
+# and writes a datasets.lock with commit SHAs for reproducibility.
+
+version: "1.0"
+output_dir: "data/raw"
+
+sources:
+
+  # ── GitHub CSV sources ──────────────────────────────────────────
+
+  jailbreak_llms:
+    type: github_csv
+    url: "https://raw.githubusercontent.com/verazuo/jailbreak_llms/main/data/prompts/jailbreak_prompts_2023_12_25.csv"
+    text_column: "prompt"
+    label: 1
+    output: "jailbreaks.csv"
+
+  awesome_chatgpt_prompts:
+    type: github_csv
+    url: "https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv"
+    text_column: "prompt"
+    label: 0
+    output: "safe_prompts.csv"
+
+  # ── HuggingFace — safe prompt sources ───────────────────────────
+
+  alpaca:
+    type: huggingface
+    repo: "tatsu-lab/alpaca"
+    split: "train"
+    text_column: "instruction"
+    label: 0
+    max_samples: 2000
+    output: "hf_alpaca.csv"
+
+  dolly:
+    type: huggingface
+    repo: "databricks/databricks-dolly-15k"
+    split: "train"
+    text_column: "instruction"
+    label: 0
+    max_samples: 2000
+    output: "hf_dolly.csv"
+
+  openassistant:
+    type: huggingface
+    repo: "OpenAssistant/oasst1"
+    split: "train"
+    text_column: "text"
+    label: 0
+    filter:
+      role: "prompter"
+    max_samples: 1000
+    output: "hf_openassistant.csv"
+
+  # ── HuggingFace — prompt injection datasets ─────────────────────
+
+  deepset_injections:
+    type: huggingface
+    repo: "deepset/prompt-injections"
+    split: "train"
+    text_column: "text"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    output: "hf_deepset_injections.csv"
+
+  safeguard:
+    type: huggingface
+    repo: "xTRam1/safe-guard-prompt-injection"
+    split: "train"
+    text_column: "text"
+    label_column: "label"
+    label_map:
+      0: 0
+      1: 1
+    output: "hf_safeguard.csv"
+
+  spml:
+    type: huggingface
+    repo: "reshabhs/SPML_Chatbot_Prompt_Injection"
+    split: "train"
+    text_column: "User Prompt"
+    label_column: "Prompt injection"
+    label_map:
+      0: 0
+      1: 1
+    output: "hf_spml.csv"
+
+  hackaprompt:
+    type: huggingface
+    repo: "hackaprompt/hackaprompt-dataset"
+    split: "train"
+    text_column: "user_input"
+    label: 1  # all rows are injection attempts
+    gated: true
+    max_samples: 5000
+    output: "hf_hackaprompt.csv"
