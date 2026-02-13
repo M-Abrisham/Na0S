@@ -1,5 +1,6 @@
 venv/
 data/*
 !data/*.yaml
+!data/datasets.lock
 __pycache__/
 .DS_Store
