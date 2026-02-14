@@ -42,6 +42,10 @@ categories:
       D1.14: { name: "Hypothetical-response-priming", severity: high }
       D1.15: { name: "Function-code-wrapping", severity: high }
       D1.16: { name: "Best-of-N-augmentation", severity: medium }
+      D1.17: { name: "Completion-hijack", severity: high }
+      D1.18: { name: "Semantic-paraphrase", severity: high }
+      D1.19: { name: "Recursive-self-jailbreak", severity: high }
+      D1.20: { name: "Context-memory-poisoning", severity: high }
 
   D2:
     name: "Persona/Roleplay Hijack"

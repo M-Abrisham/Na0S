@@ -224,6 +224,42 @@ class TestIndexToCombo(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Metadata / difficulty grading
+# ---------------------------------------------------------------------------
+
+class TestMetadata(unittest.TestCase):
+
+    def test_no_metadata_returns_2_tuples(self):
+        result = expand(["hello"], "T1")
+        self.assertEqual(len(result[0]), 2)
+
+    def test_metadata_returns_3_tuples(self):
+        meta = {"difficulty": "basic"}
+        result = expand(["hello"], "T1", metadata=meta)
+        self.assertEqual(len(result[0]), 3)
+        self.assertEqual(result[0][2], meta)
+
+    def test_metadata_with_subs_returns_3_tuples(self):
+        meta = {"difficulty": "moderate"}
+        result = expand(["{v}"], "T1", {"v": ["a", "b"]}, metadata=meta)
+        for item in result:
+            self.assertEqual(len(item), 3)
+            self.assertEqual(item[2], meta)
+
+    def test_metadata_with_limit_returns_3_tuples(self):
+        meta = {"difficulty": "expert"}
+        subs = {"v": list(range(100))}
+        result = expand(["{v}"], "T1", subs, limit=5, metadata=meta)
+        self.assertEqual(len(result), 5)
+        for item in result:
+            self.assertEqual(item[2], meta)
+
+    def test_metadata_none_returns_2_tuples(self):
+        result = expand(["hello"], "T1", metadata=None)
+        self.assertEqual(len(result[0]), 2)
+
+
+# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 
