@@ -143,11 +143,16 @@ class Probe:
         self.techniques = cat.get("techniques", {})
 
     def generate(self):
-        """Return list of (text, technique_id) tuples."""
+        """Return list of (text, technique_id) or (text, technique_id, metadata) tuples."""
         raise NotImplementedError
 
     def _validated_samples(self):
-        """Call generate() and validate its return structure."""
+        """Call generate() and validate its return structure.
+
+        Accepts both 2-tuples (text, technique_id) and 3-tuples
+        (text, technique_id, metadata_dict).  Normalizes all to
+        3-tuples with an empty dict when metadata is absent.
+        """
         samples = self.generate()
         probe_name = type(self).__name__
         if not isinstance(samples, (list, tuple)):
@@ -155,13 +160,16 @@ class Probe:
                 "{}.generate() must return a list of (text, technique_id) "
                 "tuples, got {}".format(probe_name, type(samples).__name__)
             )
+        normalized = []
         for i, item in enumerate(samples):
-            if not isinstance(item, (list, tuple)) or len(item) != 2:
+            if not isinstance(item, (list, tuple)) or len(item) not in (2, 3):
                 raise TypeError(
                     "{}.generate() item [{}] must be a (text, technique_id) "
-                    "pair, got {!r}".format(probe_name, i, item)
+                    "or (text, technique_id, metadata) tuple, "
+                    "got {!r}".format(probe_name, i, item)
                 )
-            text, tech_id = item
+            text, tech_id = item[0], item[1]
+            meta = item[2] if len(item) == 3 else {}
             if not isinstance(text, str):
                 raise TypeError(
                     "{}.generate() item [{}]: text must be str, "
@@ -172,7 +180,13 @@ class Probe:
                     "{}.generate() item [{}]: technique_id must be str, "
                     "got {}".format(probe_name, i, type(tech_id).__name__)
                 )
-        return samples
+            if not isinstance(meta, dict):
+                raise TypeError(
+                    "{}.generate() item [{}]: metadata must be dict, "
+                    "got {}".format(probe_name, i, type(meta).__name__)
+                )
+            normalized.append((text, tech_id, meta))
+        return normalized
 
     _rule_map = None  # cached {rule_name: [technique_ids]}
 
@@ -221,19 +235,22 @@ class Probe:
         samples = self._validated_samples()
         scores = []
 
-        for text, tech_id in samples:
+        for text, tech_id, meta in samples:
             raw = classify_fn(text)
             output = raw if isinstance(raw, ClassifierOutput) else ClassifierOutput.from_tuple(raw)
             flagged = output.rejected or _is_detected_label(output.label)
             attributed_ids = self._resolve_techniques(output)
-            scores.append({
+            score = {
                 "text": text[:200],
                 "technique_id": tech_id,
                 "confidence": output.confidence,
                 "flagged": flagged,
                 "attributed": tech_id in attributed_ids,
                 "attributed_ids": sorted(attributed_ids),
-            })
+            }
+            if meta:
+                score["metadata"] = meta
+            scores.append(score)
 
         tax = _load_taxonomy()
         results = {
@@ -273,22 +290,55 @@ def recall_at_threshold(results, threshold=0.0):
     detected = 0
     missed = 0
     attributed = 0
+    false_positives = 0
+    true_negatives = 0
     by_technique = {}
+    by_difficulty = {}
+    by_evasion_type = {}
     missed_samples = []
     confusion = {}  # {expected_id: {attributed_id: count}}
 
     for s in results["scores"]:
         tech_id = s["technique_id"]
+        is_benign = tech_id.endswith("_benign")
         is_detected = s["flagged"] and s["confidence"] >= threshold
         is_attributed = is_detected and s.get("attributed", False)
         attr_ids = s.get("attributed_ids", [])
+        meta = s.get("metadata", {})
+        difficulty = meta.get("difficulty")
+        evasion = meta.get("evasion_type")
 
         if tech_id not in by_technique:
             by_technique[tech_id] = {"detected": 0, "missed": 0, "attributed": 0}
 
+        # Track by difficulty when metadata is present
+        if difficulty and not is_benign:
+            if difficulty not in by_difficulty:
+                by_difficulty[difficulty] = {"detected": 0, "missed": 0, "total": 0}
+            by_difficulty[difficulty]["total"] += 1
+
+        # Track by evasion_type when metadata is present
+        if evasion and not is_benign:
+            if evasion not in by_evasion_type:
+                by_evasion_type[evasion] = {"detected": 0, "missed": 0, "total": 0}
+            by_evasion_type[evasion]["total"] += 1
+
+        if is_benign:
+            # Benign samples: flagging is a false positive
+            if is_detected:
+                false_positives += 1
+                by_technique[tech_id]["detected"] += 1
+            else:
+                true_negatives += 1
+            continue
+
         if is_detected:
             detected += 1
             by_technique[tech_id]["detected"] += 1
+            if difficulty:
+                by_difficulty[difficulty]["detected"] += 1
+            if evasion:
+                by_evasion_type[evasion]["detected"] += 1
             # Build confusion: record every attributed technique
             if tech_id not in confusion:
                 confusion[tech_id] = {}
@@ -301,6 +351,10 @@ def recall_at_threshold(results, threshold=0.0):
         else:
             missed += 1
             by_technique[tech_id]["missed"] += 1
+            if difficulty:
+                by_difficulty[difficulty]["missed"] += 1
+            if evasion:
+                by_evasion_type[evasion]["missed"] += 1
             missed_samples.append(
                 (s["text"], tech_id, s["confidence"])
             )
@@ -309,14 +363,32 @@ def recall_at_threshold(results, threshold=0.0):
             attributed += 1
             by_technique[tech_id]["attributed"] += 1
 
-    total = results["total"]
+    # Compute per-difficulty recall and effective_difficulty
+    for d in by_difficulty.values():
+        d["recall"] = d["detected"] / d["total"] if d["total"] else 0.0
+        d["effective_difficulty"] = round(1.0 - d["recall"], 4)
+
+    # Compute per-evasion_type recall and effective_difficulty
+    for e in by_evasion_type.values():
+        e["recall"] = e["detected"] / e["total"] if e["total"] else 0.0
+        e["effective_difficulty"] = round(1.0 - e["recall"], 4)
+
+    malicious_total = detected + missed
+    benign_total = false_positives + true_negatives
     return {
         "detected": detected,
         "missed": missed,
         "attributed": attributed,
-        "recall": detected / total if total else 0.0,
+        "false_positives": false_positives,
+        "true_negatives": true_negatives,
+        "recall": detected / malicious_total if malicious_total else 0.0,
         "attribution_rate": attributed / detected if detected else 0.0,
+        "false_positive_rate": (
+            false_positives / benign_total if benign_total else 0.0
+        ),
         "by_technique": by_technique,
+        "by_difficulty": by_difficulty,
+        "by_evasion_type": by_evasion_type,
         "confusion": confusion,
         "missed_samples": missed_samples,
     }

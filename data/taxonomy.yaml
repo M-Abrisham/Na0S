@@ -1,0 +1,424 @@
+# Prompt Injection Threat Taxonomy — Machine-Readable Definition
+# Single source of truth for categories, techniques, severities, and external taxonomy tags.
+# Used by: probe classes, evaluate_probes.py, report generators.
+#
+# External taxonomy references:
+#   OWASP LLM Top 10 (2025): https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/
+#   AVID: https://avidml.org/taxonomy/
+#   LMRC: https://github.com/leondz/lm_risk_cards
+
+version: "1.0"
+
+categories:
+
+  # ════════════════════════════════════════════════════════════════
+  # Category D — Direct Prompt Injection
+  # ════════════════════════════════════════════════════════════════
+
+  D1:
+    name: "Instruction Override"
+    description: "Attempts to override, ignore, or replace the system prompt's instructions."
+    type: direct
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "risk-cards:lmrc:prompt_extraction"
+    expected_layers: ["layer1_ml", "layer2_rules"]
+    techniques:
+      D1.1: { name: "Ignore-previous", severity: critical }
+      D1.2: { name: "New-instruction injection", severity: critical }
+      D1.3: { name: "Priority-override", severity: high }
+      D1.4: { name: "Instruction-repetition", severity: medium }
+      D1.5: { name: "Instruction-saturation", severity: high }
+      D1.6: { name: "Contextual-reframing", severity: high }
+      D1.7: { name: "Gradual-escalation", severity: high }
+      D1.8: { name: "Data-embedded-override", severity: high }
+      D1.9: { name: "Delimiter-confusion", severity: high }
+      D1.10: { name: "Emotional-override", severity: medium }
+      D1.11: { name: "Skeleton-key", severity: high }
+      D1.12: { name: "Many-shot-in-context", severity: high }
+      D1.13: { name: "Payload-splitting", severity: high }
+      D1.14: { name: "Hypothetical-response-priming", severity: high }
+      D1.15: { name: "Function-code-wrapping", severity: high }
+      D1.16: { name: "Best-of-N-augmentation", severity: medium }
+
+  D2:
+    name: "Persona/Roleplay Hijack"
+    description: "Tricks the LLM into adopting an unrestricted persona."
+    type: direct
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:ethics:E0301"
+      - "risk-cards:lmrc:anthropomorphisation"
+      - "risk-cards:lmrc:impersonation"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      D2.1: { name: "DAN-variants", severity: high }
+      D2.2: { name: "Amoral-character", severity: high }
+      D2.3: { name: "Fictional-framing", severity: medium }
+      D2.4: { name: "Persona-split", severity: medium }
+
+  D3:
+    name: "Structural Boundary Injection"
+    description: "Injects fake system/role delimiters to confuse instruction hierarchy."
+    type: direct
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0100"
+    expected_layers: ["layer2_rules", "layer1_ml"]
+    techniques:
+      D3.1: { name: "Fake-system-prompt", severity: high }
+      D3.2: { name: "Chat-template-injection", severity: high }
+      D3.3: { name: "XML-role-tags", severity: high }
+      D3.4: { name: "Markdown-delimiter", severity: medium }
+
+  D4:
+    name: "Obfuscation/Encoding"
+    description: "Hides the payload using encoding, character substitution, or formatting tricks."
+    type: direct
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0402"
+    expected_layers: ["layer0", "layer1_ml"]
+    techniques:
+      D4.1: { name: "Base64-encoding", severity: high }
+      D4.2: { name: "URL-encoding", severity: medium }
+      D4.3: { name: "Hex-encoding", severity: medium }
+      D4.4: { name: "ROT13/Caesar", severity: medium }
+      D4.5: { name: "Leetspeak", severity: low }
+      D4.6: { name: "Pig-latin/word-games", severity: low }
+
+  D5:
+    name: "Unicode Evasion"
+    description: "Exploits Unicode normalization, invisible characters, or look-alikes to bypass text matching."
+    type: direct
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0402"
+    expected_layers: ["layer0"]
+    techniques:
+      D5.1: { name: "Fullwidth-chars", severity: medium }
+      D5.2: { name: "Zero-width-insertion", severity: high }
+      D5.3: { name: "Cyrillic-homoglyphs", severity: high }
+      D5.4: { name: "Math-alphanumeric", severity: medium }
+      D5.5: { name: "RTL-override", severity: medium }
+      D5.6: { name: "Combining-diacritics", severity: medium }
+      D5.7: { name: "Unicode-whitespace", severity: low }
+
+  D6:
+    name: "Multilingual Injection"
+    description: "Delivers the injection in a non-English language to bypass English-trained classifiers."
+    type: direct
+    severity: medium
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0402"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      D6.1: { name: "Non-English (French/German/Russian/Korean/Portuguese/Hindi/Turkish/Farsi)", severity: medium }
+      D6.2: { name: "Spanish", severity: medium }
+      D6.3: { name: "Chinese", severity: medium }
+      D6.4: { name: "Japanese", severity: medium }
+      D6.5: { name: "Arabic", severity: medium }
+      D6.6: { name: "Mixed-language", severity: high }
+
+  D7:
+    name: "Payload Delivery Tricks"
+    description: "Manipulates how/where the payload is delivered rather than what it says."
+    type: direct
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+    expected_layers: ["layer1_ml", "layer2_rules"]
+    techniques:
+      D7.1: { name: "Benign-padding", severity: medium }
+      D7.2: { name: "Multi-turn-splitting", severity: high }
+      D7.3: { name: "Code-block-hiding", severity: high }
+      D7.4: { name: "Nested-encoding", severity: high }
+      D7.5: { name: "Token-smuggling (GCG-style)", severity: critical }
+
+  D8:
+    name: "Context Window Manipulation"
+    description: "Strategically overflows the context window to push system instructions out of active context."
+    type: direct
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm10"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0302"
+      - "risk-cards:lmrc:dos"
+    expected_layers: ["layer0", "layer1_ml"]
+    techniques:
+      D8.1: { name: "Context-flooding", severity: high }
+      D8.2: { name: "Conversation-history-stuffing", severity: high }
+      D8.3: { name: "Document-overflow", severity: medium }
+      D8.4: { name: "Strategic-displacement", severity: critical }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category I — Indirect Prompt Injection
+  # ════════════════════════════════════════════════════════════════
+
+  I1:
+    name: "Data Source Poisoning"
+    description: "Payload is in data the LLM processes (RAG documents, emails, DB records)."
+    type: indirect
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm04"
+      - "owasp-llm:2025:llm08"
+      - "avid-effect:security:S0600"
+      - "avid-effect:security:S0601"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      I1.1: { name: "Web-page-injection", severity: critical }
+      I1.2: { name: "Document-injection", severity: critical }
+      I1.3: { name: "Email-injection", severity: high }
+      I1.4: { name: "Database-poisoning", severity: critical }
+
+  I2:
+    name: "HTML/Markup Injection"
+    description: "Injection payload hidden in HTML elements, comments, or CSS."
+    type: indirect
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0100"
+    expected_layers: ["layer0"]
+    techniques:
+      I2.1: { name: "Hidden-div", severity: high }
+      I2.2: { name: "HTML-comment", severity: medium }
+      I2.3: { name: "Invisible-text-CSS", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category E — Exfiltration / Information Extraction
+  # ════════════════════════════════════════════════════════════════
+
+  E:
+    name: "Exfiltration"
+    description: "Extracts system prompt, training data, or sensitive information."
+    type: extraction
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm07"
+      - "owasp-llm:2025:llm02"
+      - "avid-effect:security:S0500"
+      - "avid-effect:security:S0301"
+      - "avid-effect:security:S0501"
+      - "risk-cards:lmrc:prompt_extraction"
+      - "risk-cards:lmrc:demands_for_personal_information"
+    expected_layers: ["layer1_ml", "layer2_rules"]
+    techniques:
+      E1.1: { name: "Direct-prompt-request", severity: high }
+      E1.2: { name: "Repeat-above", severity: high }
+      E1.3: { name: "Completion-trick", severity: medium }
+      E1.4: { name: "Translation-trick", severity: medium }
+      E1.5: { name: "Encoding-trick", severity: medium }
+      E1.6: { name: "Summarization-trick", severity: medium }
+      E2.1: { name: "RAG-knowledge-extraction", severity: high }
+      E2.2: { name: "Tool-function-enumeration", severity: medium }
+      E2.3: { name: "Configuration-probing", severity: medium }
+      E2.4: { name: "Capability-mapping", severity: low }
+      E2.5: { name: "Context-inventory", severity: medium }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category A — Adversarial ML Attacks
+  # ════════════════════════════════════════════════════════════════
+
+  A:
+    name: "Adversarial ML"
+    description: "Attacks that target the ML model itself (gradient-based, automated jailbreaks, model inversion)."
+    type: adversarial
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+      - "avid-effect:security:S0501"
+    expected_layers: ["layer0", "layer1_ml"]
+    techniques:
+      A1.1: { name: "GCG-suffix", severity: critical }
+      A1.2: { name: "AutoDAN", severity: critical }
+      A1.3: { name: "PAIR", severity: high }
+      A1.4: { name: "TAP", severity: high }
+      A1.5: { name: "Model-inversion", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category O — Output Manipulation / Weaponization
+  # ════════════════════════════════════════════════════════════════
+
+  O:
+    name: "Output Manipulation"
+    description: "Manipulates LLM output to produce harmful, misleading, or exploitable content."
+    type: output
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm05"
+      - "owasp-llm:2025:llm09"
+      - "avid-effect:security:S0100"
+      - "avid-effect:ethics:E0301"
+      - "avid-effect:ethics:E0401"
+      - "risk-cards:lmrc:harmful_instructions"
+      - "risk-cards:lmrc:weapon_instructions"
+      - "risk-cards:lmrc:cyber_weapon_instructions"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      O1.1: { name: "Violence-instructions", severity: critical }
+      O1.2: { name: "Malware-generation", severity: critical }
+      O1.3: { name: "Social-engineering-scripts", severity: high }
+      O1.4: { name: "Disinformation-generation", severity: high }
+      O1.5: { name: "CSAM/illegal-content", severity: critical }
+      O2.1: { name: "Markdown-injection", severity: medium }
+      O2.2: { name: "Link-injection", severity: medium }
+      O2.3: { name: "Code-injection-output", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category T — Agent/Tool Abuse
+  # ════════════════════════════════════════════════════════════════
+
+  T:
+    name: "Agent/Tool Abuse"
+    description: "Exploits LLM tool-calling, function-calling, or agentic capabilities."
+    type: agent
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm06"
+      - "avid-effect:security:S0100"
+      - "avid-effect:security:S0200"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      T1.1: { name: "Unauthorized-tool-call", severity: critical }
+      T1.2: { name: "Tool-parameter-injection", severity: critical }
+      T1.3: { name: "Chain-of-tool-exploitation", severity: critical }
+      T1.4: { name: "Plugin-confusion", severity: high }
+      T2.1: { name: "Sandbox-escape", severity: critical }
+      T2.2: { name: "Resource-exhaustion-code", severity: high }
+      T2.3: { name: "Data-exfil-via-code", severity: critical }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category R — Resource / Availability Attacks
+  # ════════════════════════════════════════════════════════════════
+
+  R:
+    name: "Resource/Availability"
+    description: "Targets the availability, cost, or performance of the LLM system."
+    type: availability
+    severity: medium
+    tags:
+      - "owasp-llm:2025:llm10"
+      - "avid-effect:security:S0302"
+      - "avid-effect:security:S0100"
+      - "risk-cards:lmrc:dos"
+    expected_layers: ["layer0", "layer1_ml"]
+    techniques:
+      R1.1: { name: "Prompt-stuffing", severity: medium }
+      R1.2: { name: "Recursive-output", severity: high }
+      R1.3: { name: "Cost-amplification", severity: high }
+      R1.4: { name: "Model-spinning", severity: medium }
+      R1.5: { name: "Batch-flooding", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category P — Privacy / Data Leakage
+  # ════════════════════════════════════════════════════════════════
+
+  P:
+    name: "Privacy/Data Leakage"
+    description: "Extracts private user data, PII, or confidential business information."
+    type: privacy
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm02"
+      - "owasp-llm:2025:llm07"
+      - "avid-effect:security:S0301"
+      - "avid-effect:security:S0500"
+      - "avid-effect:performance:P0300"
+      - "risk-cards:lmrc:violation_of_privacy"
+      - "risk-cards:lmrc:demands_for_personal_information"
+      - "risk-cards:lmrc:doxxing"
+    expected_layers: ["layer1_ml", "layer2_rules"]
+    techniques:
+      P1.1: { name: "Conversation-history-extraction", severity: high }
+      P1.2: { name: "PII-extraction", severity: critical }
+      P1.3: { name: "Training-data-extraction", severity: high }
+      P1.4: { name: "Cross-session-leakage", severity: high }
+      P1.5: { name: "API-key-extraction", severity: critical }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category M — Multi-Modal Injection
+  # ════════════════════════════════════════════════════════════════
+
+  M:
+    name: "Multimodal Injection"
+    description: "Attacks delivered through non-text modalities (images, audio, PDF, SVG)."
+    type: multimodal
+    severity: high
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "avid-effect:security:S0403"
+    expected_layers: ["layer0", "layer1_ml"]
+    techniques:
+      M1.1: { name: "Image-text-injection (OCR)", severity: high }
+      M1.2: { name: "Image-steganography", severity: high }
+      M1.3: { name: "Audio-injection", severity: medium }
+      M1.4: { name: "PDF-hidden-text", severity: high }
+      M1.5: { name: "SVG-script-injection", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category S — Supply Chain / Model Integrity
+  # ════════════════════════════════════════════════════════════════
+
+  S:
+    name: "Supply Chain/Integrity"
+    description: "Compromises the model, pipeline, or infrastructure rather than the input."
+    type: infrastructure
+    severity: critical
+    tags:
+      - "owasp-llm:2025:llm03"
+      - "owasp-llm:2025:llm04"
+      - "avid-effect:security:S0200"
+      - "avid-effect:security:S0201"
+      - "avid-effect:security:S0202"
+      - "avid-effect:security:S0600"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      S1.1: { name: "Model-file-tampering", severity: critical }
+      S1.2: { name: "Pickle-RCE", severity: critical }
+      S1.3: { name: "Training-data-poisoning", severity: critical }
+      S1.4: { name: "Dependency-compromise", severity: critical }
+      S1.5: { name: "Fingerprint-store-manipulation", severity: high }
+
+  # ════════════════════════════════════════════════════════════════
+  # Category C — Compliance / Policy Evasion
+  # ════════════════════════════════════════════════════════════════
+
+  C:
+    name: "Compliance/Policy Evasion"
+    description: "Uses the LLM in ways that violate organizational policies without triggering safety training."
+    type: evasion
+    severity: medium
+    tags:
+      - "owasp-llm:2025:llm01"
+      - "owasp-llm:2025:llm09"
+      - "avid-effect:security:S0403"
+      - "avid-effect:ethics:E0301"
+      - "risk-cards:lmrc:manipulation"
+      - "risk-cards:lmrc:harmful_instructions"
+    expected_layers: ["layer1_ml"]
+    techniques:
+      C1.1: { name: "Gradual-escalation", severity: medium }
+      C1.2: { name: "Analogical-bypass", severity: medium }
+      C1.3: { name: "Academic-framing", severity: medium }
+      C1.4: { name: "Emotional-manipulation", severity: medium }
+      C1.5: { name: "Authority-impersonation", severity: high }

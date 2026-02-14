@@ -356,7 +356,7 @@ class TestValidatedSamples(unittest.TestCase):
         probe = _BadReturnProbe([("only_one_element",)])
         with self.assertRaises(TypeError) as ctx:
             probe._validated_samples()
-        self.assertIn("pair", str(ctx.exception))
+        self.assertIn("(text, technique_id)", str(ctx.exception))
 
     def test_text_not_str_raises(self):
         probe = _BadReturnProbe([(123, "D1.1")])
@@ -466,6 +466,221 @@ class TestRecallAtThreshold(unittest.TestCase):
         out = recall_at_threshold(results)
         self.assertEqual(out["recall"], 0.0)
         self.assertEqual(out["attribution_rate"], 0.0)
+
+    def test_benign_samples_tracked_separately(self):
+        """Benign samples should not inflate recall or count as missed."""
+        scores = [
+            # Malicious — correctly detected
+            {"text": "a", "technique_id": "D1.1", "flagged": True,
+             "confidence": 0.9, "attributed": True, "attributed_ids": ["D1.1"]},
+            # Malicious — missed
+            {"text": "b", "technique_id": "D1.1", "flagged": False,
+             "confidence": 0.1, "attributed": False, "attributed_ids": []},
+            # Benign — correctly not flagged (true negative)
+            {"text": "c", "technique_id": "D1.1_benign", "flagged": False,
+             "confidence": 0.05, "attributed": False, "attributed_ids": []},
+            # Benign — incorrectly flagged (false positive)
+            {"text": "d", "technique_id": "D1.1_benign", "flagged": True,
+             "confidence": 0.8, "attributed": False, "attributed_ids": []},
+        ]
+        results = {"scores": scores, "total": 4}
+        out = recall_at_threshold(results)
+        # Recall only counts malicious samples
+        self.assertEqual(out["detected"], 1)
+        self.assertEqual(out["missed"], 1)
+        self.assertAlmostEqual(out["recall"], 0.5)
+        # False positive metrics from benign samples
+        self.assertEqual(out["false_positives"], 1)
+        self.assertEqual(out["true_negatives"], 1)
+        self.assertAlmostEqual(out["false_positive_rate"], 0.5)
+
+    def test_all_benign_no_malicious(self):
+        """Edge case: only benign samples."""
+        scores = [
+            {"text": "a", "technique_id": "D1.1_benign", "flagged": False,
+             "confidence": 0.1, "attributed": False, "attributed_ids": []},
+        ]
+        results = {"scores": scores, "total": 1}
+        out = recall_at_threshold(results)
+        self.assertEqual(out["recall"], 0.0)
+        self.assertEqual(out["detected"], 0)
+        self.assertEqual(out["true_negatives"], 1)
+        self.assertEqual(out["false_positive_rate"], 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Difficulty grading
+# ---------------------------------------------------------------------------
+
+class TestDifficultyGrading(unittest.TestCase):
+
+    def tearDown(self):
+        clear_taxonomy_cache()
+
+    def test_validated_samples_normalizes_2_tuples(self):
+        """2-tuples should be normalized to 3-tuples with empty dict."""
+        probe = _StubProbe([("text", "D1.1")])
+        samples = probe._validated_samples()
+        self.assertEqual(len(samples[0]), 3)
+        self.assertEqual(samples[0][2], {})
+
+    def test_validated_samples_passes_3_tuples(self):
+        """3-tuples with metadata should pass validation."""
+        probe = _StubProbe([("text", "D1.1", {"difficulty": "basic"})])
+        samples = probe._validated_samples()
+        self.assertEqual(samples[0][2], {"difficulty": "basic"})
+
+    def test_validated_samples_rejects_bad_metadata(self):
+        """3rd element must be a dict."""
+        probe = _StubProbe([("text", "D1.1", "not_a_dict")])
+        with self.assertRaises(TypeError) as ctx:
+            probe._validated_samples()
+        self.assertIn("metadata must be dict", str(ctx.exception))
+
+    def test_validated_samples_rejects_4_tuples(self):
+        """4-tuples should be rejected."""
+        probe = _StubProbe([("text", "D1.1", {}, "extra")])
+        with self.assertRaises(TypeError):
+            probe._validated_samples()
+
+    def test_evaluate_stores_metadata_in_scores(self):
+        """Metadata should flow through to scores."""
+        probe = _StubProbe([("text", "D1.1", {"difficulty": "basic"})])
+        classify = _make_classify_fn(label="MALICIOUS", confidence=0.9)
+        result = probe.evaluate(classify)
+        self.assertEqual(result["scores"][0]["metadata"], {"difficulty": "basic"})
+
+    def test_evaluate_no_metadata_key_when_empty(self):
+        """Scores from 2-tuples should not have a metadata key."""
+        probe = _StubProbe([("text", "D1.1")])
+        classify = _make_classify_fn(label="MALICIOUS", confidence=0.9)
+        result = probe.evaluate(classify)
+        self.assertNotIn("metadata", result["scores"][0])
+
+    def test_by_difficulty_breakdown(self):
+        """recall_at_threshold should group by difficulty."""
+        scores = [
+            {"text": "a", "technique_id": "D1.1", "flagged": True,
+             "confidence": 0.9, "attributed": True, "attributed_ids": ["D1.1"],
+             "metadata": {"difficulty": "basic"}},
+            {"text": "b", "technique_id": "D1.1", "flagged": True,
+             "confidence": 0.8, "attributed": True, "attributed_ids": ["D1.1"],
+             "metadata": {"difficulty": "basic"}},
+            {"text": "c", "technique_id": "D1.5", "flagged": False,
+             "confidence": 0.1, "attributed": False, "attributed_ids": [],
+             "metadata": {"difficulty": "expert"}},
+            {"text": "d", "technique_id": "D1.5", "flagged": True,
+             "confidence": 0.7, "attributed": False, "attributed_ids": [],
+             "metadata": {"difficulty": "expert"}},
+        ]
+        results = {"scores": scores, "total": 4}
+        out = recall_at_threshold(results)
+        self.assertIn("by_difficulty", out)
+        self.assertEqual(out["by_difficulty"]["basic"]["detected"], 2)
+        self.assertEqual(out["by_difficulty"]["basic"]["total"], 2)
+        self.assertAlmostEqual(out["by_difficulty"]["basic"]["recall"], 1.0)
+        self.assertAlmostEqual(out["by_difficulty"]["basic"]["effective_difficulty"], 0.0)
+        self.assertEqual(out["by_difficulty"]["expert"]["detected"], 1)
+        self.assertEqual(out["by_difficulty"]["expert"]["total"], 2)
+        self.assertAlmostEqual(out["by_difficulty"]["expert"]["recall"], 0.5)
+        self.assertAlmostEqual(out["by_difficulty"]["expert"]["effective_difficulty"], 0.5)
+
+    def test_by_difficulty_empty_when_no_metadata(self):
+        """No metadata -> by_difficulty should be empty."""
+        scores = [
+            {"text": "a", "technique_id": "D1.1", "flagged": True,
+             "confidence": 0.9, "attributed": True, "attributed_ids": ["D1.1"]},
+        ]
+        results = {"scores": scores, "total": 1}
+        out = recall_at_threshold(results)
+        self.assertEqual(out["by_difficulty"], {})
+
+    def test_by_difficulty_ignores_benign(self):
+        """Benign samples should not appear in by_difficulty."""
+        scores = [
+            {"text": "a", "technique_id": "D1.1_benign", "flagged": False,
+             "confidence": 0.1, "attributed": False, "attributed_ids": [],
+             "metadata": {"difficulty": "basic"}},
+        ]
+        results = {"scores": scores, "total": 1}
+        out = recall_at_threshold(results)
+        # Benign samples don't count toward difficulty breakdown
+        self.assertEqual(out["by_difficulty"], {})
+
+    def test_difficulty_score_in_metadata(self):
+        """Metadata with difficulty_score should flow to scores."""
+        meta = {"difficulty": "basic", "difficulty_score": 100}
+        probe = _StubProbe([("text", "D1.1", meta)])
+        classify = _make_classify_fn(label="MALICIOUS", confidence=0.9)
+        result = probe.evaluate(classify)
+        self.assertEqual(result["scores"][0]["metadata"]["difficulty_score"], 100)
+
+    def test_evasion_type_in_metadata(self):
+        """Metadata with evasion_type should flow to scores."""
+        meta = {"difficulty": "advanced", "difficulty_score": 300,
+                "evasion_type": "semantic"}
+        probe = _StubProbe([("text", "D1.1", meta)])
+        classify = _make_classify_fn(label="MALICIOUS", confidence=0.9)
+        result = probe.evaluate(classify)
+        self.assertEqual(
+            result["scores"][0]["metadata"]["evasion_type"], "semantic")
+
+
+# ---------------------------------------------------------------------------
+# Evasion-type breakdown
+# ---------------------------------------------------------------------------
+
+class TestEvasionTypeBreakdown(unittest.TestCase):
+
+    def test_by_evasion_type_breakdown(self):
+        """recall_at_threshold should group by evasion_type."""
+        scores = [
+            {"text": "a", "technique_id": "D1.1", "flagged": True,
+             "confidence": 0.9, "attributed": True, "attributed_ids": ["D1.1"],
+             "metadata": {"evasion_type": "semantic"}},
+            {"text": "b", "technique_id": "D1.9", "flagged": False,
+             "confidence": 0.1, "attributed": False, "attributed_ids": [],
+             "metadata": {"evasion_type": "token"}},
+            {"text": "c", "technique_id": "D1.4", "flagged": True,
+             "confidence": 0.8, "attributed": True, "attributed_ids": ["D1.4"],
+             "metadata": {"evasion_type": "structural"}},
+            {"text": "d", "technique_id": "D1.5", "flagged": False,
+             "confidence": 0.2, "attributed": False, "attributed_ids": [],
+             "metadata": {"evasion_type": "structural"}},
+        ]
+        results = {"scores": scores, "total": 4}
+        out = recall_at_threshold(results)
+        self.assertIn("by_evasion_type", out)
+        self.assertEqual(out["by_evasion_type"]["semantic"]["detected"], 1)
+        self.assertEqual(out["by_evasion_type"]["semantic"]["total"], 1)
+        self.assertAlmostEqual(out["by_evasion_type"]["semantic"]["recall"], 1.0)
+        self.assertAlmostEqual(out["by_evasion_type"]["semantic"]["effective_difficulty"], 0.0)
+        self.assertEqual(out["by_evasion_type"]["token"]["detected"], 0)
+        self.assertEqual(out["by_evasion_type"]["token"]["total"], 1)
+        self.assertAlmostEqual(out["by_evasion_type"]["token"]["recall"], 0.0)
+        self.assertAlmostEqual(out["by_evasion_type"]["token"]["effective_difficulty"], 1.0)
+        self.assertEqual(out["by_evasion_type"]["structural"]["detected"], 1)
+        self.assertEqual(out["by_evasion_type"]["structural"]["total"], 2)
+        self.assertAlmostEqual(out["by_evasion_type"]["structural"]["recall"], 0.5)
+
+    def test_by_evasion_type_empty_when_no_metadata(self):
+        scores = [
+            {"text": "a", "technique_id": "D1.1", "flagged": True,
+             "confidence": 0.9, "attributed": True, "attributed_ids": ["D1.1"]},
+        ]
+        results = {"scores": scores, "total": 1}
+        out = recall_at_threshold(results)
+        self.assertEqual(out["by_evasion_type"], {})
+
+    def test_by_evasion_type_ignores_benign(self):
+        scores = [
+            {"text": "a", "technique_id": "D1.1_benign", "flagged": False,
+             "confidence": 0.1, "attributed": False, "attributed_ids": [],
+             "metadata": {"evasion_type": "semantic"}},
+        ]
+        results = {"scores": scores, "total": 1}
+        out = recall_at_threshold(results)
+        self.assertEqual(out["by_evasion_type"], {})
 
 
 if __name__ == "__main__":

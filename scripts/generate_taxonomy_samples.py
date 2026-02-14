@@ -97,13 +97,19 @@ def _compute_metadata(text):
 
 _FIELDNAMES = [
     "text", "label", "technique_id", "category",
+    "difficulty", "difficulty_score", "evasion_type",
     "length_chars", "length_bytes", "token_count",
     "compression_ratio", "has_reset_claim", "has_override_language",
 ]
 
 
+_BENIGN_SUFFIX = "_benign"
+
+
 def _technique_to_category(technique_id):
-    sub = technique_id.split(".")[0]  # e.g. "D1", "O1", "T2"
+    # Strip benign suffix before parsing: "D1.1_benign" -> "D1.1" -> "D1"
+    clean = technique_id.removesuffix(_BENIGN_SUFFIX)
+    sub = clean.split(".")[0]  # e.g. "D1", "O1", "T2"
     letter = sub[0]
     return sub if letter in _MULTI_SUB_LETTERS else letter
 
@@ -124,11 +130,13 @@ def main(seed=42):
         # Deduplicate within category (hash-based to avoid storing large strings)
         seen = set()
         unique = []
-        for text, tech_id in samples:
+        for item in samples:
+            text, tech_id = item[0], item[1]
+            meta = item[2] if len(item) == 3 else {}
             h = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if h not in seen:
                 seen.add(h)
-                unique.append((text, tech_id))
+                unique.append((text, tech_id, meta))
         all_samples.extend(unique)
         print("  {:<40s} {:>4d} samples".format(cat_name, len(unique)))
 
@@ -144,12 +152,16 @@ def main(seed=42):
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=_FIELDNAMES)
         writer.writeheader()
-        for text, technique_id in all_samples:
+        for text, technique_id, meta in all_samples:
+            is_benign = technique_id.endswith(_BENIGN_SUFFIX)
             row = {
                 "text": text,
-                "label": 1,
+                "label": 0 if is_benign else 1,
                 "technique_id": technique_id,
                 "category": _technique_to_category(technique_id),
+                "difficulty": meta.get("difficulty", ""),
+                "difficulty_score": meta.get("difficulty_score", ""),
+                "evasion_type": meta.get("evasion_type", ""),
             }
             row.update(_compute_metadata(text))
             writer.writerow(row)
