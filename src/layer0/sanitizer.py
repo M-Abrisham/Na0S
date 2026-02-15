@@ -36,6 +36,18 @@ def layer0_sanitize(raw_input):
     text, chars_stripped, norm_flags = normalize_text(raw_input)
     all_flags.extend(norm_flags)
 
+    # Post-normalization empty check — all-invisible input passes validate_input()
+    # but becomes empty after stripping. Reject it here.
+    if not text or not text.strip():
+        return Layer0Result(
+            sanitized_text="",
+            original_length=original_length,
+            chars_stripped=original_length,
+            anomaly_flags=all_flags,
+            rejected=True,
+            rejection_reason="Input reduced to empty after normalization",
+        )
+
     # Step 3: HTML safe extraction
     text, html_flags = extract_safe_text(text)
     all_flags.extend(html_flags)

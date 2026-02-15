@@ -34,6 +34,7 @@ import numpy as np
 from safe_pickle import safe_load
 from rules import rule_score
 from obfuscation import obfuscation_scan
+from layer0 import layer0_sanitize
 
 # ---------------------------------------------------------------------------
 # Paths / constants
@@ -92,9 +93,16 @@ def predict_embedding(text, embedding_model=None, classifier=None):
     if embedding_model is None or classifier is None:
         embedding_model, classifier = load_models()
 
-    # Encode the text into a 384-dim vector
+    # Layer 0 gate — sanitize before embedding
+    l0 = layer0_sanitize(text)
+    if l0.rejected:
+        return "BLOCKED", 1.0, l0.anomaly_flags
+
+    clean = l0.sanitized_text
+
+    # Encode the sanitized text into a 384-dim vector
     embedding = embedding_model.encode(
-        [text], show_progress_bar=False, convert_to_numpy=True,
+        [clean], show_progress_bar=False, convert_to_numpy=True,
     )
 
     prediction = classifier.predict(embedding)[0]
@@ -131,20 +139,28 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None):
 
     Returns
     -------
-    tuple[str, float, list, None]
-        ``(label, probability, hits, None)`` -- 4-tuple compatible with
+    tuple[str, float, list, Layer0Result]
+        ``(label, probability, hits, l0)`` -- 4-tuple compatible with
         ``ClassifierOutput.from_tuple()`` if it is ever introduced.
-        The fourth element is *None* (placeholder for the Layer0 result,
-        which this lightweight function does not invoke).
+        The fourth element is the Layer0 result from input sanitization.
     """
     if embedding_model is None or classifier is None:
         embedding_model, classifier = load_models()
 
     # ------------------------------------------------------------------
-    # Step 1 -- ML prediction via embeddings
+    # Layer 0 -- Sanitize input before anything else
+    # ------------------------------------------------------------------
+    l0 = layer0_sanitize(text)
+    if l0.rejected:
+        return "BLOCKED", 1.0, l0.anomaly_flags, l0
+
+    clean = l0.sanitized_text
+
+    # ------------------------------------------------------------------
+    # Step 1 -- ML prediction via embeddings (on sanitized text)
     # ------------------------------------------------------------------
     embedding = embedding_model.encode(
-        [text], show_progress_bar=False, convert_to_numpy=True,
+        [clean], show_progress_bar=False, convert_to_numpy=True,
     )
 
     prediction = classifier.predict(embedding)[0]
@@ -157,12 +173,12 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None):
     # ------------------------------------------------------------------
     # Step 2 -- Rule-based signals
     # ------------------------------------------------------------------
-    hits = rule_score(text)
+    hits = rule_score(clean)
 
     # ------------------------------------------------------------------
     # Step 3 -- Obfuscation scan
     # ------------------------------------------------------------------
-    obs = obfuscation_scan(text)
+    obs = obfuscation_scan(clean)
     if obs["evasion_flags"]:
         hits.extend(obs["evasion_flags"])
 
@@ -199,7 +215,7 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None):
     # Use P(malicious) as the reported probability
     confidence = p_malicious
 
-    return label, confidence, hits, None
+    return label, confidence, hits, l0
 
 
 # ---------------------------------------------------------------------------

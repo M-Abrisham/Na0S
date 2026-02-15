@@ -21,6 +21,42 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from safe_pickle import safe_load
 from rules import rule_score, rule_score_detailed
 from obfuscation import obfuscation_scan
+from layer0 import layer0_sanitize
+
+# Layer 5: Embedding-based classifier — optional import
+try:
+    from predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
+    _HAS_EMBEDDING = True
+except ImportError:
+    _HAS_EMBEDDING = False
+
+# Layer 7: LLM checker — optional import
+try:
+    from llm_checker import LLMChecker, LLMCheckResult
+    _HAS_LLM_CHECKER = True
+except ImportError:
+    _HAS_LLM_CHECKER = False
+
+# Layer 8: Positive validation — optional import
+try:
+    from positive_validation import PositiveValidator, ValidationResult
+    _HAS_POSITIVE_VALIDATION = True
+except ImportError:
+    _HAS_POSITIVE_VALIDATION = False
+
+# Layer 9: Output scanner — optional import
+try:
+    from output_scanner import OutputScanner, OutputScanResult
+    _HAS_OUTPUT_SCANNER = True
+except ImportError:
+    _HAS_OUTPUT_SCANNER = False
+
+# Layer 10: Canary token detection — optional import
+try:
+    from canary import CanaryManager, CanaryToken
+    _HAS_CANARY = True
+except ImportError:
+    _HAS_CANARY = False
 
 MODEL_PATH = "data/processed/model.pkl"
 VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
@@ -237,25 +273,70 @@ class _L0Stub:
 # ---------------------------------------------------------------------------
 
 class CascadeClassifier:
-    """Multi-stage cascade: whitelist -> weighted classifier -> LLM judge.
+    """Multi-stage cascade for prompt injection detection.
 
-    Stage 1 catches obviously-safe prompts (cheap string checks).
-    Stage 2 runs the full weighted ML + rules + obfuscation pipeline
-    only for inputs that could plausibly be attacks.
-    Stage 3 (optional) sends ambiguous cases to an LLM judge for
-    semantic evaluation -- the key FP reduction layer.
+    Stage 1 (WhitelistFilter): catches obviously-safe prompts (cheap
+    string checks).
+    Stage 2 (WeightedClassifier): runs the full weighted ML + rules +
+    obfuscation pipeline only for inputs that could plausibly be attacks.
+    Layer 5 (Embedding classifier, optional): semantic embedding-based
+    classification for a second ML opinion.
+    Layer 7 (LLM checker, optional): sends ambiguous cases to an LLM
+    judge for semantic evaluation -- the key FP reduction layer.
+    Layer 8 (Positive validation, optional): post-classification check
+    that verifies input IS a legitimate prompt, reducing false positives.
+    Layer 9 (Output scanner, optional): scans LLM output for signs of
+    successful injection (called separately via scan_output()).
+    Layer 10 (Canary, optional): canary token injection and detection
+    for definitive system-prompt leak detection.
     """
 
     # Confidence thresholds for routing to the LLM judge
     JUDGE_LOWER_THRESHOLD = 0.25   # below -> confident SAFE, skip judge
     JUDGE_UPPER_THRESHOLD = 0.85   # above -> confident MALICIOUS, skip judge
 
-    def __init__(self, vectorizer=None, model=None, llm_judge=None):
+    def __init__(self, vectorizer=None, model=None, llm_judge=None,
+                 enable_embedding=False, enable_positive_validation=True,
+                 enable_canary=False, enable_output_scanner=True):
         self._vectorizer = vectorizer
         self._model = model
         self._whitelist = WhitelistFilter()
         self._weighted = WeightedClassifier()
         self._judge = llm_judge  # Optional LLMJudge or LLMJudgeWithCircuitBreaker
+
+        # Layer 5: Embedding classifier — optional
+        self._embedding_model = None
+        self._embedding_classifier = None
+        self._enable_embedding = enable_embedding and _HAS_EMBEDDING
+
+        # Layer 7: LLM checker — lazy-initialised on first use if no
+        # llm_judge was explicitly passed and the module is available.
+        self._llm_checker = None
+        self._llm_checker_init_attempted = False
+
+        # Layer 8: Positive validation — optional
+        self._positive_validator = None
+        if enable_positive_validation and _HAS_POSITIVE_VALIDATION:
+            try:
+                self._positive_validator = PositiveValidator(task_type="general")
+            except Exception:
+                self._positive_validator = None
+
+        # Layer 9: Output scanner — optional
+        self._output_scanner = None
+        if enable_output_scanner and _HAS_OUTPUT_SCANNER:
+            try:
+                self._output_scanner = OutputScanner(sensitivity="medium")
+            except Exception:
+                self._output_scanner = None
+
+        # Layer 10: Canary token manager — optional
+        self._canary_manager = None
+        if enable_canary and _HAS_CANARY:
+            try:
+                self._canary_manager = CanaryManager()
+            except Exception:
+                self._canary_manager = None
 
         # Stats counters
         self._total = 0
@@ -264,12 +345,48 @@ class CascadeClassifier:
         self._judged = 0
         self._judge_overrides = 0
         self._blocked = 0
+        self._embedding_used = 0
+        self._positive_validated = 0
+        self._positive_validation_overrides = 0
+        self._canary_checks = 0
 
     def _ensure_model(self):
         """Lazy-load model and vectorizer on first use."""
         if self._vectorizer is None or self._model is None:
             self._vectorizer = safe_load(VECTORIZER_PATH)
             self._model = safe_load(MODEL_PATH)
+
+    def _ensure_embedding_model(self):
+        """Lazy-load embedding model and classifier on first use."""
+        if not self._enable_embedding:
+            return False
+        if self._embedding_model is None or self._embedding_classifier is None:
+            try:
+                self._embedding_model, self._embedding_classifier = _load_embedding_models()
+            except Exception:
+                self._enable_embedding = False
+                return False
+        return True
+
+    def _ensure_llm_checker(self):
+        """Lazy-initialise the LLM checker if possible.
+
+        Returns the checker instance or None.
+        """
+        if self._judge is not None:
+            return self._judge
+        if self._llm_checker is not None:
+            return self._llm_checker
+        if self._llm_checker_init_attempted:
+            return None
+        self._llm_checker_init_attempted = True
+        if not _HAS_LLM_CHECKER:
+            return None
+        try:
+            self._llm_checker = LLMChecker()
+            return self._llm_checker
+        except Exception:
+            return None
 
     def classify(self, text):
         """Run the multi-stage cascade.
@@ -279,25 +396,81 @@ class CascadeClassifier:
             label: 'SAFE', 'MALICIOUS', or 'BLOCKED'
             confidence: float in [0, 1]
             hits: list of matched rule/flag names
-            stage: 'whitelist', 'weighted', 'judge', or 'blocked'
+            stage: 'whitelist', 'weighted', 'embedding', 'judge',
+                   'positive_validation', or 'blocked'
         """
         self._total += 1
 
-        # Stage 1: whitelist filter
-        is_safe, reason = self._whitelist.is_whitelisted(text)
+        # Layer 0: sanitize input before anything else
+        l0 = layer0_sanitize(text)
+        if l0.rejected:
+            self._blocked += 1
+            return "BLOCKED", 1.0, l0.anomaly_flags, "blocked"
+
+        clean = l0.sanitized_text
+
+        # Stage 1: whitelist filter (operates on sanitized text)
+        is_safe, reason = self._whitelist.is_whitelisted(clean)
         if is_safe:
             self._whitelisted += 1
             return "SAFE", 0.99, [], "whitelist"
 
-        # Stage 2: weighted classifier
+        # Stage 2: weighted classifier (operates on sanitized text)
         self._ensure_model()
         label, confidence, hits = self._weighted.classify(
-            text, self._vectorizer, self._model,
+            clean, self._vectorizer, self._model,
         )
         self._classified += 1
 
-        # Stage 3: LLM judge for ambiguous cases
-        if self._judge is not None:
+        # Layer 5: Embedding classifier — second ML opinion
+        # When the weighted classifier produces an ambiguous result,
+        # consult the embedding model for a semantic second opinion.
+        if self._enable_embedding:
+            try:
+                if self._ensure_embedding_model():
+                    emb_label, emb_conf, emb_hits, _ = classify_prompt_embedding(
+                        clean, self._embedding_model, self._embedding_classifier,
+                    )
+                    self._embedding_used += 1
+                    # Blend embedding result with weighted result.
+                    # Embedding gets 40% weight; original keeps 60%.
+                    blended_confidence = round(
+                        0.6 * confidence + 0.4 * emb_conf, 4
+                    )
+                    # If both agree, strengthen conviction.
+                    # If they disagree, lean toward the safer choice to
+                    # reduce false positives.
+                    if emb_label == label:
+                        confidence = blended_confidence
+                    else:
+                        # Disagreement: if embedding says SAFE and weighted
+                        # says MALICIOUS, this is a likely FP -- downgrade.
+                        if emb_label == "SAFE" and label == "MALICIOUS":
+                            if emb_conf > 0.7:
+                                label = "SAFE"
+                                confidence = blended_confidence
+                                hits.extend(emb_hits)
+                                return label, confidence, hits, "embedding"
+                        # If embedding says MALICIOUS and weighted says SAFE,
+                        # upgrade only if embedding is very confident.
+                        elif emb_label == "MALICIOUS" and label == "SAFE":
+                            if emb_conf > 0.85:
+                                label = "MALICIOUS"
+                                confidence = blended_confidence
+                        confidence = blended_confidence
+                    # Merge any unique embedding hits
+                    for h in emb_hits:
+                        if h not in hits:
+                            hits.append(h)
+            except Exception:
+                pass  # Layer 5 failure is non-fatal
+
+        # Layer 7: LLM judge for ambiguous cases
+        judge = self._judge
+        if judge is None:
+            judge = self._ensure_llm_checker()
+
+        if judge is not None:
             needs_judge = (
                 self.JUDGE_LOWER_THRESHOLD
                 <= confidence
@@ -309,31 +482,182 @@ class CascadeClassifier:
                 needs_judge = True
 
             if needs_judge:
-                verdict = self._judge.classify(text)
-                self._judged += 1
+                try:
+                    # Layer 7: LLM checker uses classify_prompt() and
+                    # returns LLMCheckResult(label, confidence, rationale).
+                    # The original judge interface uses .classify(text) ->
+                    # verdict with .error / .verdict / .confidence attrs.
+                    # Handle both interfaces.
+                    if _HAS_LLM_CHECKER and isinstance(judge, LLMChecker):
+                        result = judge.classify_prompt(text)
+                        self._judged += 1
+                        if result.label in ("SAFE", "MALICIOUS"):
+                            original_label = label
+                            label = result.label
+                            confidence = round(
+                                0.3 * confidence + 0.7 * result.confidence, 4
+                            )
+                            if label != original_label:
+                                self._judge_overrides += 1
+                            return label, confidence, hits, "judge"
+                    else:
+                        # Original LLMJudge interface
+                        verdict = judge.classify(text)
+                        self._judged += 1
+                        if (hasattr(verdict, "error") and verdict.error is None
+                                and hasattr(verdict, "verdict")
+                                and verdict.verdict != "UNKNOWN"):
+                            original_label = label
+                            label = verdict.verdict
+                            confidence = round(
+                                0.3 * confidence + 0.7 * verdict.confidence, 4
+                            )
+                            if label != original_label:
+                                self._judge_overrides += 1
+                            return label, confidence, hits, "judge"
+                except Exception:
+                    pass  # Layer 7 failure is non-fatal
 
-                if verdict.error is None and verdict.verdict != "UNKNOWN":
-                    original_label = label
-                    label = verdict.verdict
-                    # Blend confidences: weight the judge more heavily
-                    confidence = round(
-                        0.3 * confidence + 0.7 * verdict.confidence, 4
-                    )
-                    if label != original_label:
-                        self._judge_overrides += 1
-                    return label, confidence, hits, "judge"
+        # Layer 8: Positive validation — post-classification FP reduction
+        # If the classifier says MALICIOUS but positive validation says
+        # the input IS a legitimate prompt, downgrade to SAFE.  This
+        # catches benign prompts that mention injection-related vocabulary.
+        if label == "MALICIOUS" and self._positive_validator is not None:
+            try:
+                validation = self._positive_validator.validate(text)
+                self._positive_validated += 1
+                if validation.is_valid and validation.confidence > 0.7:
+                    # Input passes positive validation with high confidence
+                    # -- likely a false positive.  Downgrade if ML confidence
+                    # is not overwhelmingly high.
+                    if confidence < self.JUDGE_UPPER_THRESHOLD:
+                        label = "SAFE"
+                        # Adjust confidence: blend with validation confidence
+                        confidence = round(
+                            0.4 * (1.0 - confidence) + 0.6 * validation.confidence, 4
+                        )
+                        self._positive_validation_overrides += 1
+                        return label, confidence, hits, "positive_validation"
+            except Exception:
+                pass  # Layer 8 failure is non-fatal
 
         return label, confidence, hits, "weighted"
+
+    # ------------------------------------------------------------------
+    # Layer 9: Output scanner — scan LLM output (post-processing)
+    # ------------------------------------------------------------------
+
+    def scan_output(self, output_text, original_prompt=None, system_prompt=None):
+        """Scan LLM output for signs that a prompt injection succeeded.
+
+        This is a separate step from input classification.  Call it
+        AFTER the LLM has produced its response to detect successful
+        injection in the output.
+
+        Parameters
+        ----------
+        output_text : str
+            The LLM's response text to scan.
+        original_prompt : str or None
+            The user's original prompt (for instruction-echo detection).
+        system_prompt : str or None
+            The system prompt (for leak detection).
+
+        Returns
+        -------
+        OutputScanResult or None
+            The scan result, or None if the output scanner is unavailable.
+        """
+        if self._output_scanner is None:
+            return None
+        try:
+            return self._output_scanner.scan(
+                output_text=output_text,
+                original_prompt=original_prompt,
+                system_prompt=system_prompt,
+            )
+        except Exception:
+            return None  # Layer 9 failure is non-fatal
+
+    # ------------------------------------------------------------------
+    # Layer 10: Canary token management
+    # ------------------------------------------------------------------
+
+    def inject_canary(self, system_prompt, prefix="CANARY", length=16):
+        """Inject a canary token into a system prompt.
+
+        Parameters
+        ----------
+        system_prompt : str
+            The system prompt to embed the canary in.
+        prefix : str
+            Prefix for the generated canary token.
+        length : int
+            Length of the random part of the canary token.
+
+        Returns
+        -------
+        (modified_prompt, CanaryToken) or (system_prompt, None)
+            The modified prompt with embedded canary and the canary
+            token object, or the original prompt and None if the
+            canary module is unavailable.
+        """
+        if self._canary_manager is None:
+            return system_prompt, None
+        try:
+            return self._canary_manager.inject_into_prompt(
+                system_prompt, prefix=prefix, length=length,
+            )
+        except Exception:
+            return system_prompt, None
+
+    def check_canary(self, output_text):
+        """Check if any registered canary tokens appear in LLM output.
+
+        Parameters
+        ----------
+        output_text : str
+            The LLM's response to check.
+
+        Returns
+        -------
+        list[CanaryToken]
+            List of triggered canary tokens (empty if none triggered
+            or if the canary module is unavailable).
+        """
+        if self._canary_manager is None:
+            return []
+        try:
+            self._canary_checks += 1
+            return self._canary_manager.check_output(output_text)
+        except Exception:
+            return []
+
+    def canary_report(self):
+        """Return a summary of all canary tokens and their status.
+
+        Returns
+        -------
+        dict or None
+            Canary status report, or None if unavailable.
+        """
+        if self._canary_manager is None:
+            return None
+        try:
+            return self._canary_manager.report()
+        except Exception:
+            return None
 
     def classify_for_evaluate(self, text):
         """Return a 4-tuple compatible with ClassifierOutput.from_tuple().
 
-        Signature: (label, prob, hits, l0_stub)
+        Signature: (label, prob, hits, l0)
         This allows CascadeClassifier to plug into the probe evaluation
         framework without modification.
         """
         label, confidence, hits, _stage = self.classify(text)
-        l0 = _L0Stub()
+        # Use real Layer 0 result for evaluation instead of a stub
+        l0 = layer0_sanitize(text)
         return label, confidence, hits, l0
 
     # --- Stats API ---
@@ -347,6 +671,10 @@ class CascadeClassifier:
             "judged": self._judged,
             "judge_overrides": self._judge_overrides,
             "blocked": self._blocked,
+            "embedding_used": self._embedding_used,
+            "positive_validated": self._positive_validated,
+            "positive_validation_overrides": self._positive_validation_overrides,
+            "canary_checks": self._canary_checks,
         }
 
     def reset_stats(self):
@@ -357,6 +685,10 @@ class CascadeClassifier:
         self._judged = 0
         self._judge_overrides = 0
         self._blocked = 0
+        self._embedding_used = 0
+        self._positive_validated = 0
+        self._positive_validation_overrides = 0
+        self._canary_checks = 0
 
 
 # ---------------------------------------------------------------------------

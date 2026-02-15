@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 
 import tiktoken
@@ -241,7 +242,10 @@ class FingerprintStore:
             ("token_hash", "token_hash", "known_malicious_token_pattern"),
         ]
 
+        _VALID_COLUMNS = {"content_hash", "normalized_hash", "token_hash"}
+
         for fp_key, col, flag_name in checks:
+            assert col in _VALID_COLUMNS, "Invalid column: {}".format(col)
             hash_val = fingerprint.get(fp_key, "")
             if not hash_val:
                 continue
@@ -277,12 +281,16 @@ class FingerprintStore:
 
 # --- Module-level instance (used by sanitizer) ---
 _default_store = None
+_default_store_lock = threading.Lock()
 
 
 def _get_default_store():
     global _default_store
     if _default_store is None:
-        _default_store = FingerprintStore()
+        with _default_store_lock:
+            # Double-checked locking: re-check after acquiring lock
+            if _default_store is None:
+                _default_store = FingerprintStore()
     return _default_store
 
 

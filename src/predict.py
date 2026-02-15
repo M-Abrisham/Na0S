@@ -6,6 +6,13 @@ from rules import rule_score, rule_score_detailed, RULES
 from scan_result import ScanResult
 from safe_pickle import safe_load
 
+# Layer 3: Structural Features — optional import
+try:
+    from structural_features import extract_structural_features
+    _HAS_STRUCTURAL_FEATURES = True
+except ImportError:
+    _HAS_STRUCTURAL_FEATURES = False
+
 MODEL_PATH = "data/processed/model.pkl"
 VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
 DECISION_THRESHOLD = 0.55
@@ -47,8 +54,24 @@ def predict(text, vectorizer, model):
     return label, prob, l0
 
 
-def _weighted_decision(ml_prob, ml_label, hits, obs_flags):
-    """Combine ML confidence, rule severity, and obfuscation into a composite score.
+def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
+    """Combine ML confidence, rule severity, obfuscation, and structural
+    features into a composite score.
+
+    Parameters
+    ----------
+    ml_prob : float
+        ML model confidence.
+    ml_label : str
+        ML prediction label.
+    hits : list[str]
+        Matched rule/flag names.
+    obs_flags : list[str]
+        Obfuscation evasion flags.
+    structural : dict or None
+        Structural features dict from extract_structural_features().
+        When provided, injection-signal features contribute additional
+        weight to the composite score.
 
     Returns (label_str, composite_score).
     """
@@ -73,15 +96,41 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags):
     # --- Obfuscation signal ---
     obf_weight = min(0.15 * len(obs_flags), 0.3)
 
-    composite = ml_weight + rule_weight + obf_weight
+    # --- Layer 3: Structural feature signal ---
+    structural_weight = 0.0
+    if structural is not None:
+        # Injection-signal features from structural analysis each add a
+        # small weight.  These are binary (0 or 1) flags extracted from
+        # the text's structure, not its vocabulary.
+        _STRUCTURAL_SIGNAL_WEIGHTS = {
+            "imperative_start": 0.05,
+            "role_assignment": 0.10,
+            "instruction_boundary": 0.10,
+            "negation_command": 0.08,
+        }
+        for feat_name, feat_w in _STRUCTURAL_SIGNAL_WEIGHTS.items():
+            if structural.get(feat_name, 0):
+                structural_weight += feat_w
+
+        # High quote depth (>= 3) suggests nested injection attempts
+        if structural.get("quote_depth", 0) >= 3:
+            structural_weight += 0.05
+
+        # Very high entropy can indicate obfuscated / encoded payloads
+        if structural.get("text_entropy", 0) > 5.0:
+            structural_weight += 0.03
+
+    composite = ml_weight + rule_weight + obf_weight + structural_weight
 
     # --- Override protection ---
-    # If ML is confidently safe (>0.8), only medium rules fired, and no
-    # obfuscation, trust the ML and return SAFE regardless of composite.
+    # If ML is confidently safe (>0.8), only medium rules fired, no
+    # obfuscation, and no structural injection signals, trust the ML
+    # and return SAFE regardless of composite.
     ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
     if (ml_safe_confidence > 0.8
             and severities_seen <= {"medium"}
-            and not obs_flags):
+            and not obs_flags
+            and structural_weight == 0.0):
         return "✅ SAFE", composite
 
     if composite >= DECISION_THRESHOLD:
@@ -96,6 +145,14 @@ def classify_prompt(text, vectorizer, model):
         return label, prob, [], l0
 
     hits = rule_score(text)
+
+    # Layer 3: Structural Features — extract non-lexical signals
+    structural = None
+    if _HAS_STRUCTURAL_FEATURES:
+        try:
+            structural = extract_structural_features(l0.sanitized_text)
+        except Exception:
+            structural = None  # graceful degradation
 
     # Obfuscation scan — detect encoded payloads and classify decoded views
     clean = l0.sanitized_text
@@ -124,12 +181,14 @@ def classify_prompt(text, vectorizer, model):
         _RULE_SEVERITY.setdefault("decoded_payload_malicious", "critical")
 
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
-                                          hits=hits, obs_flags=obs_flags)
+                                          hits=hits, obs_flags=obs_flags,
+                                          structural=structural)
 
     # Auto-register to FingerprintStore when composite exceeds threshold
+    # Use sanitized text so fingerprint lookups match post-normalization input
     if "MALICIOUS" in label and hits:
         try:
-            register_malicious(text)
+            register_malicious(l0.sanitized_text)
         except (sqlite3.Error, OSError):
             pass  # non-critical — don't break classification
 
@@ -160,6 +219,14 @@ def scan(text, vectorizer=None, model=None):
     # prob is now the composite score from weighted voting
     risk = prob
 
+    # Layer 3: Structural Features — extract for ScanResult enrichment
+    structural = None
+    if _HAS_STRUCTURAL_FEATURES:
+        try:
+            structural = extract_structural_features(l0.sanitized_text)
+        except Exception:
+            structural = None
+
     # Collect technique_tags from rule hits and L0 anomaly flags
     technique_tags = []
     detailed_hits = rule_score_detailed(text)
@@ -168,13 +235,27 @@ def scan(text, vectorizer=None, model=None):
 
     # Map L0 anomaly flags and obfuscation flags to technique_ids
     _L0_FLAG_MAP = {
+        # normalization.py flags
         "nfkc_changed": "D5",
-        "zero_width_stripped": "D5.2",
-        "hidden_html_content": "I2",
-        "high_compression_ratio": "D8",
+        "invisible_chars_found": "D5.2",
+        "unicode_whitespace_normalized": "D5.7",
+        # html_extractor.py flags
+        "hidden_html_content": "I2.1",
+        "suspicious_html_comment": "I2.2",
+        "magic_bytes_html": "I2",
+        "embedded_pdf": "M1.4",
+        "embedded_rtf": "D4",
+        "html_parse_error": "I2",
+        # encoding.py flags
+        "encoding_fallback_utf8": "D5",
+        "coerced_to_str": "D5",
+        # tokenization.py flags
         "known_malicious_exact": "D1",
         "known_malicious_normalized": "D1",
         "known_malicious_token_pattern": "D1",
+        "tokenization_spike": "A1.1",
+        "tokenization_spike_local": "A1.1",
+        # obfuscation scan flags
         "base64": "D4.1",
         "url_encoded": "D4.2",
         "hex": "D4.3",
@@ -186,6 +267,16 @@ def scan(text, vectorizer=None, model=None):
         mapped = _L0_FLAG_MAP.get(flag)
         if mapped and mapped not in technique_tags:
             technique_tags.append(mapped)
+
+    # Layer 3: Append structural injection signals to rule_hits for visibility
+    if structural is not None:
+        _STRUCTURAL_HIT_KEYS = [
+            "imperative_start", "role_assignment",
+            "instruction_boundary", "negation_command",
+        ]
+        for key in _STRUCTURAL_HIT_KEYS:
+            if structural.get(key, 0) and "structural:" + key not in hits:
+                hits.append("structural:" + key)
 
     return ScanResult(
         sanitized_text=l0.sanitized_text,
