@@ -382,14 +382,15 @@ class TestLineParagraphSeparators(unittest.TestCase):
 class TestEdgeCaseInputs(unittest.TestCase):
     """Edge cases: all-invisible input, near-empty after stripping, etc."""
 
-    def test_all_invisible_chars_not_rejected(self):
-        # KNOWN GAP (see 1.9): validation runs BEFORE normalization,
-        # so all-invisible input passes the empty check. After stripping,
-        # sanitized_text is empty but no second validation catches it.
+    def test_all_invisible_chars_rejected(self):
+        # BUG-1 FIX: post-normalization empty check in sanitizer.py
+        # catches inputs that pass validation but become empty after
+        # invisible-char stripping.
         attack = "\u200b\u200b\u200b\u200c\u200d\u2060"
         result = layer0_sanitize(attack)
-        self.assertFalse(result.rejected)
+        self.assertTrue(result.rejected)
         self.assertEqual(result.sanitized_text, "")
+        self.assertIn("empty after normalization", result.rejection_reason)
 
     def test_single_char_after_stripping(self):
         attack = "\u200b\u200ba\u200b\u200b"
@@ -398,12 +399,14 @@ class TestEdgeCaseInputs(unittest.TestCase):
         self.assertEqual(result.sanitized_text, "a")
 
     def test_only_whitespace_after_stripping(self):
-        # KNOWN GAP: spaces survive stripping but strip() in normalization
-        # removes them. No post-normalization empty check exists.
+        # BUG-1 FIX: post-normalization empty check catches this case.
+        # Spaces survive stripping but strip() in normalization removes
+        # them, then the post-normalization check rejects the empty result.
         attack = "\u200b \u200b \u200b"
         result = layer0_sanitize(attack)
-        self.assertFalse(result.rejected)
+        self.assertTrue(result.rejected)
         self.assertEqual(result.sanitized_text, "")
+        self.assertIn("empty after normalization", result.rejection_reason)
 
 
 class TestMixedTechniqueAttacks(unittest.TestCase):

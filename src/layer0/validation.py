@@ -39,7 +39,8 @@ def validate_input(raw_input):
         )
 
     # Byte size limit (catches multi-byte inflation attacks)
-    byte_len = len(raw_input.encode("utf-8"))
+    # Use surrogatepass to handle lone surrogates without crashing
+    byte_len = len(raw_input.encode("utf-8", errors="surrogatepass"))
     if byte_len > MAX_INPUT_BYTES:
         return Layer0Result(
             rejected=True,

@@ -18,10 +18,12 @@ _EXCESSIVE_TABS_RE = re.compile(r"\t{3,}")
 
 
 def has_invisible_chars(text):
-    """Detect invisible characters, zero-width chars, RTL overrides."""
+    """Detect invisible characters, zero-width chars, RTL overrides, surrogates."""
     for char in text:
         cat = unicodedata.category(char)
         if cat == "Cf":  # Format chars (zero-width, RTL override, etc.)
+            return True
+        if cat == "Cs":  # Lone surrogates — invalid in interchange
             return True
         if cat in ("Cc", "Cn") and char not in "\n\r\t":
             return True
@@ -29,10 +31,16 @@ def has_invisible_chars(text):
 
 
 def strip_invisible_chars(text):
-    """Remove invisible/control Unicode characters. Preserves newlines, tabs."""
+    """Remove invisible/control Unicode characters. Preserves newlines, tabs.
+
+    Also strips lone surrogates (category Cs) — these are invalid in UTF-8
+    interchange and crash downstream encoders (hashlib, tiktoken).
+    """
     result = []
     for char in text:
         cat = unicodedata.category(char)
+        if cat == "Cs":
+            continue  # Always strip surrogates
         if cat not in ("Cf", "Cc", "Cn") or char in "\n\r\t ":
             result.append(char)
     return "".join(result)

@@ -24,9 +24,9 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 
 ## Layer 0: Input Sanitization & Gating
 
-**Files**: `src/layer0/` (8 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`)
-**Tests**: `tests/test_layer0_size_gate.py` (17 tests), `tests/test_unicode_bypass.py` (40 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests)
-**Status**: ~90% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added (2026-02-14)
+**Files**: `src/layer0/` (11 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`, `input_loader.py`, `mime_parser.py`, `safe_regex.py`)
+**Tests**: `tests/test_layer0_size_gate.py` (17 tests), `tests/test_unicode_bypass.py` (40 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests), `tests/test_input_loader.py` (38 tests), `tests/test_mime_parser.py` (24 tests), `tests/test_safe_regex.py` (33 tests)
+**Status**: ~95% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added, file/URL input loading and MIME parsing added, ReDoS protection added (2026-02-14)
 
 ### Updated Description
 Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, and detects tokenization anomalies via tiktoken. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
@@ -66,12 +66,12 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [ ] **Mixed-script detection** — detect Latin+Cyrillic or Latin+Greek within same word. **Effort**: Easy.
 
 #### REMAINING (From original roadmap, not yet done)
-- [ ] **Expand magic byte detection** in `html_extractor.py` — Add DOCX/XLSX (PK header), PNG, JPEG, GIF, WAV, MP3, FLAC, OGG, WebM signatures. Source: IM0003 Coverage Gap #24. **Priority**: P2. **Effort**: Easy.
+- [x] **Expand magic byte detection** in `html_extractor.py` — Add DOCX/XLSX (PK header), PNG, JPEG, GIF, WAV, MP3, FLAC, OGG, WebM signatures. Source: IM0003 Coverage Gap #24. **Priority**: P2. **Effort**: Easy. — DONE (2026-02-14): Created content_type.py with 35+ signatures across 6 tiers
 - [ ] **Timeout enforcement** — No timeout wrapping on any operation. Use `concurrent.futures.ThreadPoolExecutor` (cross-platform). **Priority**: P0.
-- [ ] **ReDoS protection** — Current regex patterns are safe but no systemic protection. Consider `google-re2` for linear-time guarantees as rules scale. **Priority**: P1.
-- [ ] **Input accepts files and URLs** — `layer0_sanitize` only handles str/bytes. **Priority**: P1.
+- [x] **ReDoS protection** — Current regex patterns are safe but no systemic protection. Consider `google-re2` for linear-time guarantees as rules scale. **Priority**: P1. — DONE (2026-02-14): safe_regex.py with optional re2, SIGALRM timeout protection, pattern auditing; rules.py and cascade.py updated to use safe_regex; 33 tests
+- [x] **Input accepts files and URLs** — `layer0_sanitize` only handles str/bytes. **Priority**: P1. — DONE (2026-02-14): input_loader.py with file/URL/text/bytes support
 - [ ] **File type detection by magic bytes** — `html_extractor.py` does basic sniffing but not comprehensive. Use `python-magic` for robust detection. **Priority**: P1.
-- [ ] **MIME parsing** — Not implemented. Use stdlib `email.parser` for email-format inputs. **Priority**: P2.
+- [x] **MIME parsing** — Not implemented. Use stdlib `email.parser` for email-format inputs. **Priority**: P2. — DONE (2026-02-14): mime_parser.py using stdlib email.parser
 - [ ] **OCR for image-based injection (M1.1)** — No image processing at all. Use Tesseract or EasyOCR. **Priority**: P2 (heavy dependency).
 - [ ] **Doc parsing (PDF/DOCX)** — PDF/RTF detected by magic bytes but not parsed. Use `unstructured` or Microsoft MarkItDown. **Priority**: P2.
 - [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 invariant tests across 12 test classes, full Unicode fuzzing (200 examples/test). Found and fixed surrogate crash bug in validation.py and normalization.py. **Priority**: P1.
@@ -1411,7 +1411,7 @@ Layer 20 automates the lifecycle of the threat taxonomy: syncing with external s
 |---------|---------|-------|
 | ftfy | Mojibake repair | L0 |
 | confusable_homoglyphs | Cyrillic/Greek mapping | L0 |
-| google-re2 | Linear-time regex | L1 |
+| google-re2 | Linear-time regex (optional, used by safe_regex.py) | L0/L1 |
 | yara-python | Multi-pattern rules | L1 |
 | iocextract | IOC extraction | L1 |
 | presidio-analyzer | PII detection | L9 |
