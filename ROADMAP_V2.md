@@ -24,12 +24,12 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 
 ## Layer 0: Input Sanitization & Gating
 
-**Files**: `src/layer0/` (11 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`, `input_loader.py`, `mime_parser.py`, `safe_regex.py`)
-**Tests**: `tests/test_layer0_size_gate.py` (17 tests), `tests/test_unicode_bypass.py` (40 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests), `tests/test_input_loader.py` (38 tests), `tests/test_mime_parser.py` (24 tests), `tests/test_safe_regex.py` (33 tests)
-**Status**: ~95% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added, file/URL input loading and MIME parsing added, ReDoS protection added (2026-02-14)
+**Files**: `src/layer0/` (14 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`, `input_loader.py`, `mime_parser.py`, `safe_regex.py`, `content_type.py`, `ocr_extractor.py`, `doc_extractor.py`)
+**Tests**: `tests/test_layer0_size_gate.py` (17 tests), `tests/test_unicode_bypass.py` (40 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests), `tests/test_input_loader.py` (38 tests), `tests/test_mime_parser.py` (24 tests), `tests/test_safe_regex.py` (33 tests), `tests/test_content_type.py` (88 tests), `tests/test_ocr_extractor.py` (27 tests), `tests/test_doc_extractor.py` (32 tests)
+**Status**: ~98% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added, file/URL input loading and MIME parsing added, ReDoS protection added, comprehensive magic-byte content-type detection added, OCR image extraction and document parsing (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback added (2026-02-14)
 
 ### Updated Description
-Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, and detects tokenization anomalies via tiktoken. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
+Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, detects tokenization anomalies via tiktoken, extracts text from images via OCR (EasyOCR/Tesseract), and parses documents (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback when optional dependencies are missing. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
 
 ### TODO List
 
@@ -70,10 +70,10 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [ ] **Timeout enforcement** — No timeout wrapping on any operation. Use `concurrent.futures.ThreadPoolExecutor` (cross-platform). **Priority**: P0.
 - [x] **ReDoS protection** — Current regex patterns are safe but no systemic protection. Consider `google-re2` for linear-time guarantees as rules scale. **Priority**: P1. — DONE (2026-02-14): safe_regex.py with optional re2, SIGALRM timeout protection, pattern auditing; rules.py and cascade.py updated to use safe_regex; 33 tests
 - [x] **Input accepts files and URLs** — `layer0_sanitize` only handles str/bytes. **Priority**: P1. — DONE (2026-02-14): input_loader.py with file/URL/text/bytes support
-- [ ] **File type detection by magic bytes** — `html_extractor.py` does basic sniffing but not comprehensive. Use `python-magic` for robust detection. **Priority**: P1.
+- [x] **File type detection by magic bytes** — `html_extractor.py` does basic sniffing but not comprehensive. Use `python-magic` for robust detection. **Priority**: P1. — DONE (2026-02-14): Manual detection in content_type.py, no python-magic dependency
 - [x] **MIME parsing** — Not implemented. Use stdlib `email.parser` for email-format inputs. **Priority**: P2. — DONE (2026-02-14): mime_parser.py using stdlib email.parser
-- [ ] **OCR for image-based injection (M1.1)** — No image processing at all. Use Tesseract or EasyOCR. **Priority**: P2 (heavy dependency).
-- [ ] **Doc parsing (PDF/DOCX)** — PDF/RTF detected by magic bytes but not parsed. Use `unstructured` or Microsoft MarkItDown. **Priority**: P2.
+- [x] **OCR for image-based injection (M1.1)** — No image processing at all. Use Tesseract or EasyOCR. **Priority**: P2 (heavy dependency). — DONE (2026-02-14): `ocr_extractor.py` with optional EasyOCR/Tesseract, graceful fallback when deps missing, PIL image decoding, configurable max size, integrated into sanitizer.py
+- [x] **Doc parsing (PDF/DOCX)** — PDF/RTF detected by magic bytes but not parsed. Use `unstructured` or Microsoft MarkItDown. **Priority**: P2. — DONE (2026-02-14): `doc_extractor.py` with optional pymupdf/pdfplumber/PyPDF2 for PDF, python-docx for DOCX, striprtf for RTF, openpyxl for XLSX, python-pptx for PPTX, graceful fallback when deps missing, security limits (max pages, max text size), integrated into sanitizer.py
 - [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 invariant tests across 12 test classes, full Unicode fuzzing (200 examples/test). Found and fixed surrogate crash bug in validation.py and normalization.py. **Priority**: P1.
 - [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage reporting, PR checks, smoke tests (13 tests). **Priority**: P0.
 - [ ] **Resource exhaustion protection** — No rate limiting, no memory caps, no max recursion depth for HTML parser. **Priority**: P1.

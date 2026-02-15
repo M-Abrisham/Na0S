@@ -1,6 +1,8 @@
 import re
 from html.parser import HTMLParser
 
+from .content_type import sniff_binary
+
 # Quick check: does the string contain anything that looks like an HTML tag?
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z/!]")
 
@@ -22,12 +24,6 @@ _HTML_SIGNATURES = [
     b"<iframe",
     b"<svg",
     b"<?xml",
-]
-
-# Non-HTML embedded formats that can carry executable content
-_DANGEROUS_SIGNATURES = [
-    (b"%PDF", "embedded_pdf"),
-    (b"{\\rtf", "embedded_rtf"),
 ]
 
 # Hidden-content CSS patterns in inline styles
@@ -55,8 +51,12 @@ _COMMENT_KEYWORDS_RE = re.compile(
 def sniff_content_type(text):
     """Detect real content type from magic bytes, not file extensions.
 
-    A ".txt" file could contain HTML — this function inspects the actual
+    A ".txt" file could contain HTML -- this function inspects the actual
     bytes to determine the true content type.
+
+    Binary format detection (PDF, RTF, images, archives, executables, etc.)
+    is delegated to ``content_type.sniff_binary()``.  This function retains
+    HTML/SVG signature detection and BOM handling.
 
     Returns a list of flags. Empty list means plain text.
     """
@@ -77,11 +77,9 @@ def sniff_content_type(text):
             flags.append("magic_bytes_html")
             break
 
-    # Check for dangerous embedded document formats
-    trimmed = raw.lstrip()[:10]
-    for sig, flag_name in _DANGEROUS_SIGNATURES:
-        if trimmed.startswith(sig):
-            flags.append(flag_name)
+    # Delegate binary format detection to content_type module
+    binary_flags = sniff_binary(text)
+    flags.extend(binary_flags)
 
     return flags
 
@@ -134,8 +132,13 @@ def extract_safe_text(text):
     sniff_flags = sniff_content_type(text)
     flags.extend(sniff_flags)
 
-    # Dangerous embedded formats — flag and return raw text
-    if any(f in ("embedded_pdf", "embedded_rtf") for f in sniff_flags):
+    # Non-HTML binary content detected — flag and return raw text.
+    # Any embedded_* category flag means the content is not parseable HTML.
+    _BINARY_CATEGORIES = (
+        "embedded_document", "embedded_image", "embedded_audio",
+        "embedded_video", "embedded_archive", "embedded_executable",
+    )
+    if any(f in _BINARY_CATEGORIES for f in sniff_flags):
         return text, flags
 
     # Step 2: Decide whether to parse as HTML

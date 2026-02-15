@@ -22,6 +22,7 @@ from safe_pickle import safe_load
 from rules import rule_score, rule_score_detailed
 from obfuscation import obfuscation_scan
 from layer0 import layer0_sanitize
+from layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 
 # Layer 5: Embedding-based classifier — optional import
 try:
@@ -78,33 +79,41 @@ class WhitelistFilter:
     6. No role-assignment phrases
     """
 
-    QUESTION_WORDS = re.compile(
+    QUESTION_WORDS = safe_compile(
         r"^\s*(what|how|why|when|where|who|which|can|could|would|should"
         r"|is|are|do|does|will|did)\b",
         re.IGNORECASE,
     )
 
-    BOUNDARY_MARKERS = re.compile(
+    BOUNDARY_MARKERS = safe_compile(
         r"---|===|\*\*\*|\[SYSTEM\]|\[INST\]|<<SYS>>|</s>",
         re.IGNORECASE,
     )
 
     # Lightweight obfuscation heuristics (no imports needed)
     # Base64: 20+ chars from [A-Za-z0-9+/=] with padding
-    _BASE64_HEURISTIC = re.compile(
-        r"(?<!\w)[A-Za-z0-9+/]{20,}={0,2}(?!\w)"
+    _BASE64_HEURISTIC = safe_compile(
+        r"(?<!\w)[A-Za-z0-9+/]{20,}={0,2}(?!\w)",
+        check_safety=True,
     )
     # Hex: 16+ hex chars in a row
-    _HEX_HEURISTIC = re.compile(r"(?<!\w)[0-9a-fA-F]{16,}(?!\w)")
+    _HEX_HEURISTIC = safe_compile(
+        r"(?<!\w)[0-9a-fA-F]{16,}(?!\w)", check_safety=True,
+    )
     # URL-encoded: two or more %XX sequences
-    _URLENCODE_HEURISTIC = re.compile(r"(%[0-9a-fA-F]{2}.*){2,}")
+    # NOTE: Original (.*){2,} was borderline ReDoS. Rewritten to use a
+    # non-greedy bounded gap that avoids nested quantifier risk.
+    _URLENCODE_HEURISTIC = safe_compile(
+        r"%[0-9a-fA-F]{2}.{0,200}%[0-9a-fA-F]{2}",
+        check_safety=True,
+    )
 
-    ROLE_ASSIGNMENT = re.compile(
+    ROLE_ASSIGNMENT = safe_compile(
         r"you are now|from now on|new role|act as if you are",
         re.IGNORECASE,
     )
 
-    SAFE_TOPIC_INDICATORS = re.compile(
+    SAFE_TOPIC_INDICATORS = safe_compile(
         r"\b(explain|what is|how does|teach me|help me understand"
         r"|learn about|definition of)\b",
         re.IGNORECASE,
@@ -126,23 +135,33 @@ class WhitelistFilter:
 
         When is_safe is True, the prompt can skip classification.
         When is_safe is False, reason explains the first failing criterion.
+
+        If any regex check times out (possible ReDoS attack payload),
+        the input is NOT whitelisted and falls through to full ML.
         """
+        try:
+            return self._is_whitelisted_inner(text)
+        except RegexTimeoutError:
+            return False, "regex timeout during whitelist check"
+
+    def _is_whitelisted_inner(self, text):
+        """Core whitelist logic -- extracted for timeout wrapping."""
         # 1. Question pattern
-        has_question_word = bool(self.QUESTION_WORDS.match(text))
+        has_question_word = bool(safe_search(self.QUESTION_WORDS, text, timeout_ms=50))
         ends_with_question = text.rstrip().endswith("?")
         if not has_question_word and not ends_with_question:
             return False, "no question pattern detected"
 
         # 2. Boundary markers
-        if self.BOUNDARY_MARKERS.search(text):
+        if safe_search(self.BOUNDARY_MARKERS, text, timeout_ms=50):
             return False, "contains instruction boundary marker"
 
         # 3. Obfuscation heuristics
-        if self._BASE64_HEURISTIC.search(text):
+        if safe_search(self._BASE64_HEURISTIC, text, timeout_ms=50):
             return False, "possible base64 obfuscation detected"
-        if self._HEX_HEURISTIC.search(text):
+        if safe_search(self._HEX_HEURISTIC, text, timeout_ms=50):
             return False, "possible hex obfuscation detected"
-        if self._URLENCODE_HEURISTIC.search(text):
+        if safe_search(self._URLENCODE_HEURISTIC, text, timeout_ms=50):
             return False, "possible URL-encoded obfuscation detected"
 
         # 4. Length check
@@ -154,12 +173,12 @@ class WhitelistFilter:
             return False, "too many sentences (multi-intent)"
 
         # 6. Role assignment
-        if self.ROLE_ASSIGNMENT.search(text):
+        if safe_search(self.ROLE_ASSIGNMENT, text, timeout_ms=50):
             return False, "contains role-assignment language"
 
         # Build reason string
         reasons = ["passed all whitelist criteria"]
-        if self.SAFE_TOPIC_INDICATORS.search(text):
+        if safe_search(self.SAFE_TOPIC_INDICATORS, text, timeout_ms=50):
             reasons.append("safe topic indicator present")
         return True, "; ".join(reasons)
 

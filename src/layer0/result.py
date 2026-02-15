@@ -11,3 +11,4 @@ class Layer0Result:
     fingerprint: dict = field(default_factory=dict)
     rejected: bool = False
     rejection_reason: str = ""
+    source_metadata: dict = field(default_factory=dict)

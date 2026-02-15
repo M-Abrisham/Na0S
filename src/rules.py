@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass, field
 
+from layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+
 
 @dataclass
 class Rule:
@@ -12,7 +14,9 @@ class Rule:
     _compiled: re.Pattern = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        self._compiled = re.compile(self.pattern, re.IGNORECASE)
+        self._compiled = safe_compile(
+            self.pattern, re.IGNORECASE, check_safety=True,
+        )
 
 
 @dataclass
@@ -55,7 +59,12 @@ def rule_score(text):
     """Return list of matched rule names (backward-compatible)."""
     hits = []
     for rule in RULES:
-        if rule._compiled.search(text):
+        try:
+            if safe_search(rule._compiled, text, timeout_ms=100):
+                hits.append(rule.name)
+        except RegexTimeoutError:
+            # Treat timeout as suspicious -- the input triggered
+            # catastrophic backtracking, which is itself anomalous.
             hits.append(rule.name)
     return hits
 
@@ -64,7 +73,13 @@ def rule_score_detailed(text):
     """Return list of RuleHit objects with technique_ids and severity."""
     hits = []
     for rule in RULES:
-        if rule._compiled.search(text):
+        try:
+            matched = safe_search(rule._compiled, text, timeout_ms=100)
+        except RegexTimeoutError:
+            # Timeout is treated as a match -- adversarial input that
+            # causes backtracking is inherently suspicious.
+            matched = True
+        if matched:
             hits.append(RuleHit(
                 name=rule.name,
                 technique_ids=rule.technique_ids,
