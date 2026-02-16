@@ -135,6 +135,26 @@ def layer0_sanitize(raw_input):
             raw_input, all_flags, source_metadata,
         )
 
+    # Step 0d-pre: Raw byte size guard — reject oversized binary payloads
+    # BEFORE decoding.  Wide encodings (e.g. UTF-32) can shrink dramatically
+    # when re-encoded to UTF-8, so checking the decoded string alone would
+    # let an attacker smuggle oversized raw payloads past the byte limit.
+    if isinstance(raw_input, (bytes, bytearray)):
+        from .validation import MAX_INPUT_BYTES
+        raw_byte_len = len(raw_input)
+        if raw_byte_len > MAX_INPUT_BYTES:
+            all_flags.append("raw_bytes_oversized")
+            return Layer0Result(
+                rejected=True,
+                rejection_reason=(
+                    "raw input exceeds {} byte limit (got {} bytes)"
+                    .format(MAX_INPUT_BYTES, raw_byte_len)
+                ),
+                original_length=raw_byte_len,
+                anomaly_flags=all_flags,
+                source_metadata=source_metadata,
+            )
+
     # Step 0d: Encoding detection — decode bytes before anything else
     if isinstance(raw_input, (bytes, bytearray)):
         raw_input, encoding_used, enc_flags = decode_to_str(raw_input)
