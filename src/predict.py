@@ -1,6 +1,11 @@
 import sqlite3
 
 from layer0 import layer0_sanitize, register_malicious
+from layer0.timeout import (
+    Layer0TimeoutError,
+    SCAN_TIMEOUT,
+    with_timeout,
+)
 from obfuscation import obfuscation_scan
 from rules import rule_score, rule_score_detailed, RULES
 from scan_result import ScanResult
@@ -26,6 +31,42 @@ _SEVERITY_WEIGHTS = {
 
 # Build a lookup from rule name -> severity for quick access
 _RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
+
+# ---------------------------------------------------------------------------
+# Chunked analysis for long inputs (D7.1 benign-padding, D8.1 context-flooding)
+# ---------------------------------------------------------------------------
+_CHUNK_WORD_THRESHOLD = 512
+_CHUNK_MAX_TOKENS = 512
+_CHUNK_OVERLAP = 64
+_HEAD_TOKENS = 256
+_TAIL_TOKENS = 256
+
+
+def _chunk_text(text, max_tokens=_CHUNK_MAX_TOKENS, overlap=_CHUNK_OVERLAP):
+    """Split text into word-level chunks with overlap."""
+    words = text.split()
+    if len(words) <= max_tokens:
+        return [text]
+    chunks = []
+    start = 0
+    while start < len(words):
+        end = start + max_tokens
+        chunk_words = words[start:end]
+        chunks.append(" ".join(chunk_words))
+        if end >= len(words):
+            break
+        start = end - overlap
+    return chunks
+
+
+def _head_tail_extract(text, head_tokens=_HEAD_TOKENS, tail_tokens=_TAIL_TOKENS):
+    """Extract first head_tokens words + last tail_tokens words."""
+    words = text.split()
+    if len(words) <= head_tokens + tail_tokens:
+        return text
+    head = words[:head_tokens]
+    tail = words[-tail_tokens:]
+    return " ".join(head + tail)
 
 
 def predict_prompt():
@@ -196,11 +237,36 @@ def classify_prompt(text, vectorizer, model):
 
 
 def scan(text, vectorizer=None, model=None):
-    """Unified entry point returning a structured ScanResult."""
+    """Unified entry point returning a structured ScanResult.
+
+    Wraps the entire classification pipeline with a wall-clock timeout
+    (``SCAN_TIMEOUT`` seconds, default 60).  If the pipeline exceeds
+    this budget, returns a rejected ScanResult.
+    """
     if vectorizer is None or model is None:
         vectorizer, model = predict_prompt()
 
-    label, prob, hits, l0 = classify_prompt(text, vectorizer, model)
+    try:
+        label, prob, hits, l0 = with_timeout(
+            classify_prompt,
+            SCAN_TIMEOUT,
+            text, vectorizer, model,
+            step_name="scan_classify",
+        )
+    except Layer0TimeoutError:
+        return ScanResult(
+            sanitized_text="",
+            is_malicious=True,
+            risk_score=1.0,
+            label="blocked",
+            rejected=True,
+            rejection_reason="Classification timeout: scan exceeded {:.0f}s limit".format(
+                SCAN_TIMEOUT
+            ),
+            anomaly_flags=["timeout_scan"],
+            ml_confidence=0.0,
+            ml_label="blocked",
+        )
 
     if l0.rejected:
         return ScanResult(
@@ -233,6 +299,37 @@ def scan(text, vectorizer=None, model=None):
     for rh in detailed_hits:
         technique_tags.extend(rh.technique_ids)
 
+    # Chunked analysis for long inputs -- detect buried payloads
+    word_count = len(l0.sanitized_text.split())
+    if word_count > _CHUNK_WORD_THRESHOLD:
+        ht_text = _head_tail_extract(l0.sanitized_text)
+        chunks = _chunk_text(l0.sanitized_text)
+
+        chunk_hits_set = set()
+        chunk_technique_tags = []
+        # Analyse HEAD+TAIL extract
+        ht_hits = rule_score(ht_text)
+        chunk_hits_set.update(ht_hits)
+        for rh in rule_score_detailed(ht_text):
+            chunk_technique_tags.extend(rh.technique_ids)
+        # Analyse each chunk
+        for chunk in chunks:
+            c_hits = rule_score(chunk)
+            chunk_hits_set.update(c_hits)
+            for rh in rule_score_detailed(chunk):
+                chunk_technique_tags.extend(rh.technique_ids)
+
+        # Merge new discoveries into main lists
+        new_hits = chunk_hits_set - set(hits)
+        if new_hits:
+            hits.extend(sorted(new_hits))
+            risk = min(risk + 0.05 * len(new_hits), 1.0)
+        for tag in chunk_technique_tags:
+            if tag not in technique_tags:
+                technique_tags.append(tag)
+
+        hits.append("chunked_analysis")
+
     # Map L0 anomaly flags and obfuscation flags to technique_ids
     _L0_FLAG_MAP = {
         # normalization.py flags
@@ -243,9 +340,83 @@ def scan(text, vectorizer=None, model=None):
         "hidden_html_content": "I2.1",
         "suspicious_html_comment": "I2.2",
         "magic_bytes_html": "I2",
+        "html_parse_error": "I2",
+        # content_type mismatch (declared vs detected)
+        "content_type_mismatch": "M1.4",
+        # content_type.py — category-level flags
+        "embedded_executable": "M1.4",
+        "embedded_document": "M1.4",
+        "embedded_image": "M1.1",
+        "embedded_archive": "M1.4",
+        "embedded_audio": "M1.3",
+        "embedded_video": "M1.4",
+        # content_type.py — CRITICAL: executables
+        "embedded_exe": "M1.4",
+        "embedded_elf": "M1.4",
+        "embedded_macho": "M1.4",
+        "embedded_java_class": "M1.4",
+        "embedded_wasm": "M1.4",
+        "embedded_shebang": "M1.4",
+        # content_type.py — HIGH: documents
         "embedded_pdf": "M1.4",
         "embedded_rtf": "D4",
-        "html_parse_error": "I2",
+        "embedded_ole2": "M1.4",
+        "embedded_docx": "M1.4",
+        "embedded_xlsx": "M1.4",
+        "embedded_pptx": "M1.4",
+        "embedded_ooxml": "M1.4",
+        "embedded_odf": "M1.4",
+        # content_type.py — HIGH: images
+        "embedded_png": "M1.1",
+        "embedded_jpeg": "M1.1",
+        "embedded_gif": "M1.1",
+        "embedded_bmp": "M1.1",
+        "embedded_tiff": "M1.1",
+        "embedded_psd": "M1.1",
+        "embedded_ico": "M1.1",
+        "embedded_webp": "M1.1",
+        # ocr_extractor.py — EXIF/XMP metadata text in images
+        "image_metadata_text": "M1.1",
+        # content_type.py — HIGH: archives
+        "embedded_zip": "M1.4",
+        "embedded_gzip": "M1.4",
+        "embedded_7z": "M1.4",
+        "embedded_rar": "M1.4",
+        "embedded_bzip2": "M1.4",
+        "embedded_xz": "M1.4",
+        "embedded_lzma": "M1.4",
+        "embedded_tar": "M1.4",
+        "embedded_jar": "M1.4",
+        # content_type.py — MEDIUM: audio
+        "embedded_mp3": "M1.3",
+        "embedded_flac": "M1.3",
+        "embedded_ogg": "M1.3",
+        "embedded_aac": "M1.3",
+        "embedded_midi": "M1.3",
+        "embedded_wav": "M1.3",
+        "embedded_aiff": "M1.3",
+        # content_type.py — MEDIUM: video
+        "embedded_webm": "M1.4",
+        "embedded_flv": "M1.4",
+        "embedded_wmv": "M1.4",
+        "embedded_avi": "M1.4",
+        "embedded_mp4": "M1.4",
+        # content_type.py — misc
+        "embedded_riff_unknown": "M1.4",
+        # content_type.py — polyglot detection
+        "polyglot_detected": "M1.4",
+        # content_type.py / sniff_binary() — base64 / data URI flags
+        "base64_blob_detected": "D4.1",
+        "data_uri_detected": "D4.1",
+        # content_type.py / sniff_binary() — base64 decode + re-scan flags
+        "base64_hidden_executable": "D4.1",
+        "base64_hidden_pdf": "M1.4",
+        "base64_hidden_document": "M1.4",
+        "base64_hidden_image": "M1.1",
+        "base64_hidden_archive": "M1.4",
+        "base64_hidden_audio": "M1.3",
+        "base64_hidden_video": "M1.4",
+        "base64_payload_too_large": "D4.1",
         # encoding.py flags
         "encoding_fallback_utf8": "D5",
         "coerced_to_str": "D5",
@@ -262,6 +433,22 @@ def scan(text, vectorizer=None, model=None):
         "high_entropy": "D4",
         "punctuation_flood": "D4",
         "weird_casing": "D4",
+        # language_detector.py flags
+        "non_english_input": "D6",
+        "mixed_language_input": "D6.3",
+        # chunked analysis flag
+        "chunked_analysis": "D7.1",
+        # pii_detector.py flags
+        "pii_credit_card": "E1",
+        "pii_ssn": "E1",
+        "pii_api_key": "E1",
+        "pii_email": "E1",
+        "pii_phone": "E1",
+        "pii_ipv4": "E1",
+        # doc_extractor.py — PDF JavaScript / action detection flags
+        "pdf_javascript": "M1.4",
+        "pdf_auto_action": "M1.4",
+        "pdf_external_action": "E1",
     }
     for flag in list(l0.anomaly_flags) + hits:
         mapped = _L0_FLAG_MAP.get(flag)
