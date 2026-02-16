@@ -450,8 +450,9 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
 
         result = layer0_sanitize("Hello world, this is a test.")
         self.assertFalse(result.rejected)
-        # Plain text should have empty source_metadata (no loading needed)
-        self.assertEqual(result.source_metadata, {})
+        # Plain text should not have loading-related source_metadata
+        # (language detection metadata is expected from Step 5)
+        self.assertNotIn("source_type", result.source_metadata)
 
     @patch("layer0.input_loader._validate_url_target")
     @patch("layer0.input_loader._build_safe_opener")

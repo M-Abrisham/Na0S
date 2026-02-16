@@ -9,23 +9,208 @@ from .html_extractor import extract_safe_text
 from .tokenization import check_tokenization_anomaly
 from .content_type import detect_content_type
 from .input_loader import load_input, InputLoadError
+from .language_detector import detect_language
+from .pii_detector import scan_pii
 from .mime_parser import parse_mime_input, _looks_like_mime
 from .ocr_extractor import (
     OCRResult,
+    ImageMetadataResult,
     detect_image_format,
     extract_text_from_image,
+    extract_image_metadata,
 )
 from .doc_extractor import (
     DocResult,
     detect_doc_type,
+    detect_pdf_javascript,
     extract_text_from_document,
+)
+from .timeout import (
+    Layer0TimeoutError,
+    L0_PIPELINE_TIMEOUT,
+    get_step_timeout,
+    with_timeout,
 )
 
 _logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# MIME family mapping for content-type mismatch detection
+# ---------------------------------------------------------------------------
+# Maps MIME types to a canonical "family" label.  Two declared/detected types
+# are considered a mismatch only when their families differ.
+#
+# Design decisions:
+#   - application/octet-stream is generic ("unknown binary"); servers and
+#     file-extension guessers emit it as a catch-all, so it MUST NOT trigger
+#     a mismatch.
+#   - Minor variations within a family (e.g. image/jpeg vs image/png) are
+#     NOT mismatches -- both are images.
+#   - text/* is one family; an HTML file declared as text/plain is still
+#     "text family".  The HTML extractor handles sub-type nuances.
+
+_MIME_FAMILY_MAP = {
+    # --- Text ---
+    "text/plain": "text",
+    "text/html": "text",
+    "text/xml": "text",
+    "text/css": "text",
+    "text/csv": "text",
+    "text/javascript": "text",
+    "text/x-shellscript": "text",
+    "application/json": "text",
+    "application/xml": "text",
+    "application/javascript": "text",
+    # --- Documents ---
+    "application/pdf": "document",
+    "application/rtf": "document",
+    "application/x-ole-storage": "document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
+    "application/vnd.openxmlformats-officedocument": "document",
+    "application/vnd.oasis.opendocument": "document",
+    "application/msword": "document",
+    "application/vnd.ms-excel": "document",
+    "application/vnd.ms-powerpoint": "document",
+    # --- Images ---
+    "image/png": "image",
+    "image/jpeg": "image",
+    "image/gif": "image",
+    "image/bmp": "image",
+    "image/tiff": "image",
+    "image/webp": "image",
+    "image/vnd.adobe.photoshop": "image",
+    "image/x-icon": "image",
+    "image/svg+xml": "image",
+    # --- Audio ---
+    "audio/mpeg": "audio",
+    "audio/flac": "audio",
+    "audio/ogg": "audio",
+    "audio/aac": "audio",
+    "audio/midi": "audio",
+    "audio/wav": "audio",
+    "audio/aiff": "audio",
+    "audio/x-wav": "audio",
+    # --- Video ---
+    "video/webm": "video",
+    "video/x-flv": "video",
+    "video/x-ms-wmv": "video",
+    "video/x-msvideo": "video",
+    "video/mp4": "video",
+    "video/quicktime": "video",
+    # --- Archives ---
+    "application/zip": "archive",
+    "application/gzip": "archive",
+    "application/x-7z-compressed": "archive",
+    "application/x-rar-compressed": "archive",
+    "application/x-bzip2": "archive",
+    "application/x-xz": "archive",
+    "application/x-lzma": "archive",
+    "application/x-tar": "archive",
+    "application/java-archive": "archive",
+    # --- Executables ---
+    "application/x-dosexec": "executable",
+    "application/x-elf": "executable",
+    "application/x-mach-binary": "executable",
+    "application/wasm": "executable",
+    "application/x-executable": "executable",
+    "application/x-sharedlib": "executable",
+}
+
+# Types that are too generic to trigger a mismatch
+_GENERIC_TYPES = frozenset([
+    "application/octet-stream",
+    "",
+    None,
+])
+
+
+def _get_mime_family(mime_type):
+    """Return the canonical family label for a MIME type.
+
+    Falls back to the top-level type (e.g. ``"image"`` for any
+    ``image/*``) when the exact MIME is not in the map.
+    Returns ``None`` for generic / unknown types.
+    """
+    if not mime_type or mime_type in _GENERIC_TYPES:
+        return None
+
+    # Strip parameters (e.g. "text/html; charset=utf-8" -> "text/html")
+    base = mime_type.split(";")[0].strip().lower()
+
+    if base in _GENERIC_TYPES:
+        return None
+
+    # Exact lookup first
+    family = _MIME_FAMILY_MAP.get(base)
+    if family:
+        return family
+
+    # Fallback: use the top-level type as family (e.g. "image" for "image/x-foo")
+    top_level = base.split("/")[0] if "/" in base else None
+    if top_level in ("text", "image", "audio", "video"):
+        return top_level
+
+    return None
+
+
+def _check_content_type_mismatch(source_metadata, ct_result):
+    """Compare declared content type vs magic-byte detected type.
+
+    Parameters
+    ----------
+    source_metadata : dict
+        Metadata from input_loader containing ``"content_type"`` (declared
+        MIME from HTTP header or file extension).
+    ct_result : ContentTypeResult
+        Result from ``detect_content_type()`` with the magic-byte detected
+        ``mime_type``.
+
+    Returns
+    -------
+    list[str]
+        Anomaly flags to add (empty list if no mismatch).
+    """
+    declared_mime = source_metadata.get("content_type")
+    detected_mime = ct_result.mime_type if ct_result else None
+
+    # Nothing to compare if either side is missing or generic
+    if not declared_mime or not detected_mime:
+        return []
+
+    declared_family = _get_mime_family(declared_mime)
+    detected_family = _get_mime_family(detected_mime)
+
+    # If either side resolves to None (generic/unknown), no mismatch
+    if declared_family is None or detected_family is None:
+        return []
+
+    # Same family -> no mismatch
+    if declared_family == detected_family:
+        return []
+
+    # Genuine mismatch detected
+    source_metadata["content_type_mismatch"] = {
+        "declared_type": declared_mime,
+        "declared_family": declared_family,
+        "detected_type": detected_mime,
+        "detected_family": detected_family,
+    }
+    _logger.warning(
+        "Content-type mismatch: declared=%s (%s) vs detected=%s (%s)",
+        declared_mime, declared_family, detected_mime, detected_family,
+    )
+    return ["content_type_mismatch"]
+
+
 def layer0_sanitize(raw_input):
     """Main Layer 0 entry point. Every input must pass through here first.
+
+    Wraps the internal pipeline with a wall-clock timeout
+    (``L0_PIPELINE_TIMEOUT`` seconds).  If the entire pipeline exceeds
+    this budget, returns a rejected ``Layer0Result``.
 
     Processing order:
         -1. Input loading (file path, URL, pathlib.Path -> bytes/str)
@@ -38,6 +223,28 @@ def layer0_sanitize(raw_input):
     Accepts: str, bytes, pathlib.Path, file path string, URL string.
     Returns a Layer0Result with sanitized text and metadata.
     """
+    try:
+        return with_timeout(
+            _layer0_sanitize_inner,
+            L0_PIPELINE_TIMEOUT,
+            raw_input,
+            step_name="layer0_pipeline",
+        )
+    except Layer0TimeoutError:
+        _logger.warning(
+            "Layer 0 pipeline timed out after %.1fs", L0_PIPELINE_TIMEOUT,
+        )
+        return Layer0Result(
+            rejected=True,
+            rejection_reason="Processing timeout: Layer 0 pipeline exceeded {:.0f}s limit".format(
+                L0_PIPELINE_TIMEOUT
+            ),
+            anomaly_flags=["timeout_pipeline"],
+        )
+
+
+def _layer0_sanitize_inner(raw_input):
+    """Internal Layer 0 pipeline — called by layer0_sanitize with timeout."""
     all_flags = []
     source_metadata = {}
 
@@ -93,6 +300,15 @@ def layer0_sanitize(raw_input):
             source_metadata["content_type_detected"] = ct_result.detected_type
             source_metadata["content_type_mime"] = ct_result.mime_type
             source_metadata["content_type_tier"] = ct_result.tier
+
+            # Step 0a-mismatch: Compare declared type (HTTP header / file
+            # extension) against magic-byte detected type.  Runs BEFORE
+            # the reject gate so the flag is present even on rejected inputs.
+            mismatch_flags = _check_content_type_mismatch(
+                source_metadata, ct_result,
+            )
+            all_flags.extend(mismatch_flags)
+
             if ct_result.reject:
                 return Layer0Result(
                     rejected=True,
@@ -169,8 +385,23 @@ def layer0_sanitize(raw_input):
 
     original_length = len(raw_input)
 
-    # Step 2: Normalization
-    text, chars_stripped, norm_flags = normalize_text(raw_input)
+    # Step 2: Normalization (with per-step timeout)
+    try:
+        text, chars_stripped, norm_flags = with_timeout(
+            normalize_text,
+            get_step_timeout("normalize"),
+            raw_input,
+            step_name="normalize",
+        )
+    except Layer0TimeoutError:
+        all_flags.append("timeout_normalize")
+        return Layer0Result(
+            rejected=True,
+            rejection_reason="Processing timeout: normalization step",
+            original_length=original_length,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
     all_flags.extend(norm_flags)
 
     # Post-normalization empty check — all-invisible input passes validate_input()
@@ -186,16 +417,67 @@ def layer0_sanitize(raw_input):
             source_metadata=source_metadata,
         )
 
-    # Step 3: HTML safe extraction
-    text, html_flags = extract_safe_text(text)
+    # Step 3: HTML safe extraction (with per-step timeout)
+    try:
+        text, html_flags = with_timeout(
+            extract_safe_text,
+            get_step_timeout("html"),
+            text,
+            step_name="html",
+        )
+    except Layer0TimeoutError:
+        all_flags.append("timeout_html")
+        return Layer0Result(
+            rejected=True,
+            rejection_reason="Processing timeout: HTML extraction step",
+            original_length=original_length,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
     all_flags.extend(html_flags)
 
-    # Step 4: Tokenization anomaly detection + fingerprinting
-    tok_flags, token_char_ratio, fingerprint = check_tokenization_anomaly(text)
+    # Step 4: Tokenization anomaly detection + fingerprinting (with per-step timeout)
+    try:
+        tok_flags, token_char_ratio, fingerprint = with_timeout(
+            check_tokenization_anomaly,
+            get_step_timeout("tokenize"),
+            text,
+            step_name="tokenize",
+        )
+    except Layer0TimeoutError:
+        all_flags.append("timeout_tokenize")
+        return Layer0Result(
+            rejected=True,
+            rejection_reason="Processing timeout: tokenization step",
+            original_length=original_length,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
     all_flags.extend(tok_flags)
 
     # Calculate total characters removed (normalization + HTML stripping)
     total_stripped = original_length - len(text)
+
+    # Step 5: Language detection for multilingual routing
+    lang_result = detect_language(text)
+    if lang_result["anomaly_flags"]:
+        all_flags.extend(lang_result["anomaly_flags"])
+    source_metadata["language"] = {
+        "detected": lang_result["detected_language"],
+        "confidence": lang_result["language_confidence"],
+        "is_non_english": lang_result["is_non_english"],
+    }
+
+    # Step 6: PII / secrets pre-screening
+    pii_result = scan_pii(text)
+    if pii_result.has_pii:
+        all_flags.extend(sorted(pii_result.anomaly_flags))
+        source_metadata["pii_scan"] = {
+            "has_pii": True,
+            "pii_types_found": pii_result.pii_types_found,
+            "pii_count": pii_result.pii_count,
+            "details": pii_result.details,
+        }
 
     return Layer0Result(
         sanitized_text=text,
@@ -254,11 +536,31 @@ def _try_binary_extraction(raw_bytes, flags, metadata):
                 _logger.debug("OCR warning: %s", w)
         metadata["ocr_engine"] = ocr_result.engine
         metadata["ocr_confidence"] = ocr_result.confidence
+
+        # --- EXIF/XMP metadata text extraction ---
+        meta_result = extract_image_metadata(raw_bytes)
+        if meta_result.warnings:
+            for w in meta_result.warnings:
+                _logger.debug("Image metadata warning: %s", w)
+        if meta_result.has_metadata_text:
+            flags.append("image_metadata_text")
+            metadata["image_metadata_fields"] = meta_result.metadata_fields
+            metadata["image_metadata_text"] = meta_result.metadata_text
+
+        # Combine OCR text + metadata text for downstream scanning
+        combined_parts = []
         if ocr_result.text:
             flags.append("ocr_text_extracted")
-            return ocr_result.text, flags, metadata
+            combined_parts.append(ocr_result.text)
         else:
             flags.append("ocr_no_text")
+
+        if meta_result.has_metadata_text:
+            combined_parts.append(meta_result.metadata_text)
+
+        if combined_parts:
+            return "\n".join(combined_parts), flags, metadata
+        else:
             return raw_bytes, flags, metadata
 
     # --- Check for document formats ---
@@ -281,11 +583,27 @@ def _try_binary_extraction(raw_bytes, flags, metadata):
             doc_result = extract_text_from_document(raw_bytes, dtype)
             if doc_result.warnings:
                 for w in doc_result.warnings:
-                    _logger.debug("Doc extraction warning: %s", w)
+                    # Extract anomaly flags emitted by detect_pdf_javascript
+                    if w.startswith("flag:"):
+                        flags.append(w[5:])  # strip "flag:" prefix
+                    else:
+                        _logger.debug("Doc extraction warning: %s", w)
             metadata["doc_engine"] = doc_result.engine
             metadata["doc_page_count"] = doc_result.page_count
             if doc_result.metadata:
                 metadata["doc_metadata"] = doc_result.metadata
+
+            # Run PDF JavaScript detection directly for PDFs (ensures
+            # detection even when text extraction fails or no PDF lib
+            # is installed -- the byte scan is independent of parsing).
+            if dtype == "pdf":
+                js_result = detect_pdf_javascript(raw_bytes)
+                if js_result["has_javascript"]:
+                    for js_flag in sorted(js_result["anomaly_flags"]):
+                        if js_flag not in flags:
+                            flags.append(js_flag)
+                    metadata["pdf_js_detection"] = js_result
+
             if doc_result.text:
                 flags.append("doc_text_extracted")
                 return doc_result.text, flags, metadata

@@ -9,6 +9,8 @@ L0_TIMEOUT_SEC           Global default timeout (seconds). Default: 5
 L0_TIMEOUT_NORMALIZE     Timeout for normalization step. Default: L0_TIMEOUT_SEC
 L0_TIMEOUT_HTML          Timeout for HTML extraction step. Default: L0_TIMEOUT_SEC
 L0_TIMEOUT_TOKENIZE      Timeout for tokenization step.   Default: L0_TIMEOUT_SEC
+L0_TIMEOUT_PIPELINE      Overall Layer 0 pipeline timeout. Default: 30
+SCAN_TIMEOUT_SEC         Overall scan/classify timeout.   Default: 60
 """
 
 import os
@@ -42,6 +44,12 @@ STEP_TIMEOUTS = {
         os.getenv("L0_TIMEOUT_TOKENIZE", str(DEFAULT_TIMEOUT))
     ),
 }
+
+# Overall Layer 0 pipeline timeout (wraps the entire layer0_sanitize call)
+L0_PIPELINE_TIMEOUT = float(os.getenv("L0_TIMEOUT_PIPELINE", "30"))
+
+# Overall scan/classify timeout (wraps classify_prompt in predict.py)
+SCAN_TIMEOUT = float(os.getenv("SCAN_TIMEOUT_SEC", "60"))
 
 
 def get_step_timeout(step_name: str) -> float:
