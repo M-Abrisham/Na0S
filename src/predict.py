@@ -144,18 +144,18 @@ def classify_prompt(text, vectorizer, model):
     if l0.rejected:
         return label, prob, [], l0
 
-    hits = rule_score(text)
+    clean = l0.sanitized_text
+    hits = rule_score(clean)
 
     # Layer 3: Structural Features — extract non-lexical signals
     structural = None
     if _HAS_STRUCTURAL_FEATURES:
         try:
-            structural = extract_structural_features(l0.sanitized_text)
+            structural = extract_structural_features(clean)
         except Exception:
             structural = None  # graceful degradation
 
     # Obfuscation scan — detect encoded payloads and classify decoded views
-    clean = l0.sanitized_text
     obs = obfuscation_scan(clean)
     if obs["evasion_flags"]:
         hits.extend(obs["evasion_flags"])
@@ -229,7 +229,7 @@ def scan(text, vectorizer=None, model=None):
 
     # Collect technique_tags from rule hits and L0 anomaly flags
     technique_tags = []
-    detailed_hits = rule_score_detailed(text)
+    detailed_hits = rule_score_detailed(l0.sanitized_text)
     for rh in detailed_hits:
         technique_tags.extend(rh.technique_ids)
 

@@ -95,7 +95,10 @@ class _TextExtractor(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         style = dict(attrs).get("style", "")
-        if _HIDDEN_STYLE_RE.search(style):
+        if self._skip_depth > 0:
+            # Already inside a hidden element — track nested depth
+            self._skip_depth += 1
+        elif _HIDDEN_STYLE_RE.search(style):
             self._flags.append("hidden_html_content")
             self._skip_depth += 1
 

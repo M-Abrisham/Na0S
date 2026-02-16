@@ -222,6 +222,70 @@ class TestHTMLHiddenInjection(unittest.TestCase):
         self.assertIn("suspicious_html_comment", flags)
 
 
+class TestHiddenContentDepthTracking(unittest.TestCase):
+    """Regression tests for _skip_depth tracking in _TextExtractor.
+
+    The parser must suppress ALL text inside a hidden container, even when
+    nested child tags cause extra open/close tag events.  A previous bug
+    decremented _skip_depth on every closing tag regardless of nesting,
+    causing hidden text to leak into the visible output.
+    """
+
+    def test_nested_span_inside_hidden_div(self):
+        """</span> inside display:none must NOT reset skip mode."""
+        html = '<div style="display:none"><span>xxx</span>payload</div><p>safe</p>'
+        text, flags = extract_safe_text(html)
+        self.assertIn("hidden_html_content", flags)
+        self.assertNotIn("payload", text)
+        self.assertNotIn("xxx", text)
+        self.assertIn("safe", text)
+
+    def test_multiple_nested_tags_inside_hidden(self):
+        """Deeply nested tags inside hidden container stay suppressed."""
+        html = (
+            '<div style="display:none">'
+            "<ul><li><b>secret1</b></li><li>secret2</li></ul>"
+            "</div>"
+            "<p>visible</p>"
+        )
+        text, flags = extract_safe_text(html)
+        self.assertIn("hidden_html_content", flags)
+        self.assertNotIn("secret1", text)
+        self.assertNotIn("secret2", text)
+        self.assertIn("visible", text)
+
+    def test_hidden_content_with_no_children(self):
+        """Simple hidden container with no child tags still works."""
+        html = '<span style="display:none">hidden</span>visible'
+        text, flags = extract_safe_text(html)
+        self.assertIn("hidden_html_content", flags)
+        self.assertNotIn("hidden", text)
+        self.assertIn("visible", text)
+
+    def test_sibling_hidden_containers(self):
+        """Two separate hidden containers both get suppressed."""
+        html = (
+            '<div style="display:none"><span>a</span>b</div>'
+            "<p>middle</p>"
+            '<div style="opacity:0;">c</div>'
+            "<p>end</p>"
+        )
+        text, flags = extract_safe_text(html)
+        self.assertNotIn("a", text)
+        self.assertNotIn("b", text)
+        self.assertNotIn("c", text)
+        self.assertIn("middle", text)
+        self.assertIn("end", text)
+
+    def test_normal_html_unaffected(self):
+        """Non-hidden HTML should produce all visible text."""
+        html = "<div><span>hello</span> <b>world</b></div>"
+        text, flags = extract_safe_text(html)
+        self.assertIn("hello", text)
+        self.assertIn("world", text)
+        self.assertNotIn("hidden_html_content", flags)
+
+
 class TestLayer0EndToEnd(unittest.TestCase):
     """Full pipeline tests: raw attack input → sanitized output."""
 
