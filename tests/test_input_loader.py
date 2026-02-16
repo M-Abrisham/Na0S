@@ -1,4 +1,5 @@
 import os
+import stat
 import sys
 import tempfile
 import pathlib
@@ -14,6 +15,9 @@ from layer0.input_loader import (
     _is_url,
     _is_file_path,
     _validate_file_path,
+    _validate_path_string,
+    _validate_fd,
+    _safe_open_file,
     MAX_FILE_SIZE,
 )
 
@@ -294,17 +298,25 @@ class TestSymlinkRejection(unittest.TestCase):
             os.unlink(real_path)
 
 
+def _mock_opener(mock_resp):
+    """Create a mock opener whose open() returns mock_resp as a context manager."""
+    mock_opener = MagicMock()
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    mock_opener.open.return_value = mock_resp
+    return mock_opener
+
+
 class TestURLLoading(unittest.TestCase):
     """URL inputs should be fetched with urllib."""
 
-    @patch("layer0.input_loader.urllib.request.urlopen")
-    def test_https_url_success(self, mock_urlopen):
+    @patch("layer0.input_loader._validate_url_target")
+    @patch("layer0.input_loader._build_safe_opener")
+    def test_https_url_success(self, mock_build, mock_ssrf):
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"<html>Hello</html>"
         mock_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_build.return_value = _mock_opener(mock_resp)
 
         content, meta = load_input("https://example.com/page")
         self.assertEqual(content, b"<html>Hello</html>")
@@ -319,30 +331,33 @@ class TestURLLoading(unittest.TestCase):
         self.assertIn("HTTPS only", str(ctx.exception))
 
     @patch("layer0.input_loader.HTTPS_ONLY", False)
-    @patch("layer0.input_loader.urllib.request.urlopen")
-    def test_http_allowed_when_configured(self, mock_urlopen):
+    @patch("layer0.input_loader._validate_url_target")
+    @patch("layer0.input_loader._build_safe_opener")
+    def test_http_allowed_when_configured(self, mock_build, mock_ssrf):
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"content"
         mock_resp.headers = {"Content-Type": "text/plain"}
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_build.return_value = _mock_opener(mock_resp)
 
         content, meta = load_input("http://example.com/page")
         self.assertEqual(content, b"content")
         self.assertEqual(meta["source_type"], "url")
 
-    @patch("layer0.input_loader.urllib.request.urlopen")
-    def test_url_fetch_failure(self, mock_urlopen):
+    @patch("layer0.input_loader._validate_url_target")
+    @patch("layer0.input_loader._build_safe_opener")
+    def test_url_fetch_failure(self, mock_build, mock_ssrf):
         import urllib.error
-        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = urllib.error.URLError("Connection refused")
+        mock_build.return_value = mock_opener
 
         with self.assertRaises(InputLoadError) as ctx:
             load_input("https://example.com/fail")
         self.assertIn("URL fetch failed", str(ctx.exception))
 
-    @patch("layer0.input_loader.urllib.request.urlopen")
-    def test_url_oversized_response(self, mock_urlopen):
+    @patch("layer0.input_loader._validate_url_target")
+    @patch("layer0.input_loader._build_safe_opener")
+    def test_url_oversized_response(self, mock_build, mock_ssrf):
         import layer0.input_loader as loader
         orig = loader.MAX_URL_RESPONSE_SIZE
         loader.MAX_URL_RESPONSE_SIZE = 100
@@ -350,9 +365,7 @@ class TestURLLoading(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"x" * 101
         mock_resp.headers = {"Content-Type": "text/plain"}
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_build.return_value = _mock_opener(mock_resp)
 
         try:
             with self.assertRaises(InputLoadError) as ctx:
@@ -440,16 +453,15 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
         # Plain text should have empty source_metadata (no loading needed)
         self.assertEqual(result.source_metadata, {})
 
-    @patch("layer0.input_loader.urllib.request.urlopen")
-    def test_url_through_sanitizer(self, mock_urlopen):
+    @patch("layer0.input_loader._validate_url_target")
+    @patch("layer0.input_loader._build_safe_opener")
+    def test_url_through_sanitizer(self, mock_build, mock_ssrf):
         from layer0 import layer0_sanitize
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"URL content for testing purposes."
         mock_resp.headers = {"Content-Type": "text/plain"}
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+        mock_build.return_value = _mock_opener(mock_resp)
 
         result = layer0_sanitize("https://example.com/test")
         self.assertFalse(result.rejected)
@@ -462,6 +474,151 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
         result = layer0_sanitize(b"Bytes input for testing.")
         self.assertFalse(result.rejected)
         self.assertIn("testing", result.sanitized_text.lower())
+
+
+class TestTOCTOUSafeFileOpen(unittest.TestCase):
+    """TOCTOU prevention: atomic open with O_NOFOLLOW + fd-based validation."""
+
+    def test_normal_file_loads(self):
+        """Regular file still loads correctly via the atomic fd path."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False
+        ) as f:
+            f.write("toctou safe content")
+            f.flush()
+            filepath = f.name
+
+        try:
+            content, meta = load_input(filepath)
+            self.assertEqual(content, b"toctou safe content")
+            self.assertEqual(meta["source_type"], "file")
+        finally:
+            os.unlink(filepath)
+
+    def test_symlink_rejected_at_open_time(self):
+        """Symlink rejected via O_NOFOLLOW in a single syscall (no race window)."""
+        with tempfile.NamedTemporaryFile(
+            suffix=".txt", delete=False
+        ) as f:
+            f.write(b"secret data")
+            f.flush()
+            real_path = f.name
+
+        link_path = real_path + ".toctou_link"
+        try:
+            os.symlink(real_path, link_path)
+            with self.assertRaises(InputLoadError) as ctx:
+                _safe_open_file(link_path)
+            self.assertIn("Symlink", str(ctx.exception))
+        finally:
+            if os.path.islink(link_path):
+                os.unlink(link_path)
+            os.unlink(real_path)
+
+    def test_pathlib_nonexistent_no_precheck(self):
+        """pathlib.Path to nonexistent file raises InputLoadError via EAFP."""
+        fake_path = pathlib.Path("/tmp/nonexistent_toctou_test_12345.txt")
+        with self.assertRaises(InputLoadError) as ctx:
+            load_input(fake_path)
+        self.assertIn("File not found", str(ctx.exception))
+
+    def test_path_traversal_still_blocked(self):
+        """Directory traversal is caught by string-only check (no FS call)."""
+        with self.assertRaises(InputLoadError) as ctx:
+            _validate_path_string("/tmp/safe/../../../etc/passwd")
+        self.assertIn("Directory traversal", str(ctx.exception))
+
+    def test_validate_fd_rejects_directory(self):
+        """_validate_fd rejects an fd pointing to a directory."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            fd = os.open(tmpdir, os.O_RDONLY)
+            try:
+                with self.assertRaises(InputLoadError) as ctx:
+                    _validate_fd(fd, tmpdir)
+                self.assertIn("directory", str(ctx.exception).lower())
+            finally:
+                os.close(fd)
+        finally:
+            os.rmdir(tmpdir)
+
+    def test_validate_fd_accepts_regular_file(self):
+        """_validate_fd returns stat result for a regular file."""
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(b"test")
+            filepath = f.name
+
+        try:
+            fd = os.open(filepath, os.O_RDONLY)
+            try:
+                st = _validate_fd(fd, filepath)
+                self.assertTrue(stat.S_ISREG(st.st_mode))
+            finally:
+                os.close(fd)
+        finally:
+            os.unlink(filepath)
+
+    def test_safe_open_file_returns_fd(self):
+        """_safe_open_file returns a valid fd for a regular file."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False
+        ) as f:
+            f.write("fd test content")
+            filepath = f.name
+
+        try:
+            fd = _safe_open_file(filepath)
+            try:
+                content = os.read(fd, 1024)
+                self.assertEqual(content, b"fd test content")
+            finally:
+                os.close(fd)
+        finally:
+            os.unlink(filepath)
+
+    def test_safe_open_file_nonexistent(self):
+        """_safe_open_file raises InputLoadError for nonexistent files."""
+        with self.assertRaises(InputLoadError) as ctx:
+            _safe_open_file("/tmp/nonexistent_safe_open_12345.txt")
+        self.assertIn("File not found", str(ctx.exception))
+
+    def test_directory_rejected_via_load_input(self):
+        """Directories are rejected through the fd-based validation path."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            with self.assertRaises(InputLoadError) as ctx:
+                load_input(tmpdir)
+            self.assertIn("directory", str(ctx.exception).lower())
+        finally:
+            os.rmdir(tmpdir)
+
+    def test_single_fd_flow_no_reopen(self):
+        """Verify the entire load path uses one fd (no path re-open)."""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False
+        ) as f:
+            f.write("single fd test")
+            filepath = f.name
+
+        try:
+            # Patch os.open to count how many times it's called for our file
+            original_open = os.open
+            open_count = [0]
+
+            def counting_open(path, flags, *args, **kwargs):
+                if path == filepath:
+                    open_count[0] += 1
+                return original_open(path, flags, *args, **kwargs)
+
+            with patch("layer0.input_loader.os.open", side_effect=counting_open):
+                content, meta = load_input(filepath)
+
+            self.assertEqual(content, b"single fd test")
+            # _load_file should only call os.open ONCE (the atomic open)
+            self.assertEqual(open_count[0], 1,
+                             "Expected exactly 1 os.open call (atomic), got {}".format(open_count[0]))
+        finally:
+            os.unlink(filepath)
 
 
 if __name__ == "__main__":
