@@ -188,7 +188,23 @@ class TestUnknownTagWarning(_TempTSVMixin, unittest.TestCase):
 # Issue 6 — Summary stats + attribution passthrough
 # ---------------------------------------------------------------------------
 
-class TestSummaryAndAttribution(unittest.TestCase):
+class TestSummaryAndAttribution(_TempTSVMixin, unittest.TestCase):
+
+    def setUp(self):
+        super().setUp()
+        # Create a temp TSV so aggregate_by_taxonomy can load tags
+        from pathlib import Path
+        self._tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".tsv", delete=False,
+        )
+        self._tmp.write("ns:tag1\tTag One\n")
+        self._tmp.write("ns:tag2\tTag Two\n")
+        self._tmp.close()
+        _set_tags_path(Path(self._tmp.name))
+
+    def tearDown(self):
+        os.unlink(self._tmp.name)
+        super().tearDown()
 
     def _make_groups(self):
         return {
