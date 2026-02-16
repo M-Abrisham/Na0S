@@ -7,5 +7,5 @@ coverage>=7.0
 # Linting
 flake8>=6.0
 
-# Property-based testing (future use)
-# hypothesis>=6.0
+# Property-based testing
+hypothesis>=6.0

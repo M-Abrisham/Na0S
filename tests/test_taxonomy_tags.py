@@ -129,7 +129,24 @@ class TestDuplicateTags(_TempTSVMixin, unittest.TestCase):
 # Issue 4 — Prefix matching enforces delimiter
 # ---------------------------------------------------------------------------
 
-class TestNamespaceDelimiter(unittest.TestCase):
+class TestNamespaceDelimiter(_TempTSVMixin, unittest.TestCase):
+
+    def setUp(self):
+        super().setUp()
+        # Create a temp TSV so aggregate_by_taxonomy can load tags
+        from pathlib import Path
+        self._tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".tsv", delete=False,
+        )
+        self._tmp.write("owasp-llm:2025:llm01\tLLM01 Prompt Injection\n")
+        self._tmp.write("owasp-llm:2025:llm02\tLLM02 Insecure Output\n")
+        self._tmp.write("risk-cards:lmrc:dos\tDenial of Service\n")
+        self._tmp.close()
+        _set_tags_path(Path(self._tmp.name))
+
+    def tearDown(self):
+        os.unlink(self._tmp.name)
+        super().tearDown()
 
     def test_short_prefix_does_not_cross_contaminate(self):
         """namespace='owasp' must NOT match 'owasp-llm:...'."""

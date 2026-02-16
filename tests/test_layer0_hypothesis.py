@@ -14,14 +14,21 @@ import unicodedata
 import unittest
 
 # ---------------------------------------------------------------------------
-# Hypothesis import with helpful error if not installed
+# Hypothesis import — skip the entire module gracefully if not installed.
+#
+# We must abort before any class body is evaluated, because decorators
+# like @given(...) and @FUZZ_SETTINGS reference hypothesis objects.
+# unittest.skipUnless on a class does NOT prevent its body from executing,
+# so class-level skips alone are insufficient — they would still cause
+# NameError at import time.  raise unittest.SkipTest(...) at module level
+# is the standard unittest pattern for optional-dependency test modules.
 # ---------------------------------------------------------------------------
 try:
     from hypothesis import given, settings, HealthCheck, assume
     import hypothesis.strategies as st
 except ImportError:
-    raise ImportError(
-        "Hypothesis is required for property-based tests.\n"
+    raise unittest.SkipTest(
+        "hypothesis not installed — skipping property-based tests. "
         "Install with:  pip install hypothesis"
     )
 
@@ -36,7 +43,7 @@ from layer0.normalization import normalize_text
 from layer0.validation import MAX_INPUT_LENGTH
 
 # ---------------------------------------------------------------------------
-# Shared Hypothesis settings — CI-friendly, generous deadline
+# Shared Hypothesis settings and strategies
 # ---------------------------------------------------------------------------
 FUZZ_SETTINGS = settings(
     max_examples=200,
@@ -48,9 +55,9 @@ FUZZ_SETTINGS = settings(
     ],
 )
 
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------
 # Custom strategies
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------
 
 # Full Unicode range (every category, every plane)
 unicode_text = st.text(
@@ -162,7 +169,6 @@ def long_input(draw):
 
 # Encoding variants: same text encoded in different charsets then passed as bytes
 _ENCODINGS = ["utf-8", "utf-16", "latin-1", "ascii", "cp1252"]
-
 
 @st.composite
 def encoding_variants(draw):
