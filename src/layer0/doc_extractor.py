@@ -20,6 +20,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,95 @@ class DocResult:
 
 
 # ---------------------------------------------------------------------------
+# PDF JavaScript / action detection
+# ---------------------------------------------------------------------------
+
+# Operators that indicate JavaScript or dangerous actions in PDF streams.
+# These are scanned at the raw-byte level (fast, no PDF parser needed).
+#
+#   /JS, /JavaScript   — JavaScript code/dictionary
+#   /OpenAction         — auto-execute action when PDF opens
+#   /AA                 — additional actions (page open/close, focus, etc.)
+#   /Launch             — launch external application
+#   /SubmitForm         — form submission (data exfiltration risk)
+#   /ImportData         — import external data into form fields
+#
+# Each entry maps a PDF operator (as bytes) to the anomaly flag category.
+
+_PDF_JS_INDICATORS: list[tuple[bytes, str]] = [
+    (b"/JS",         "pdf_javascript"),
+    (b"/JavaScript", "pdf_javascript"),
+    (b"/OpenAction", "pdf_auto_action"),
+    (b"/AA",         "pdf_auto_action"),
+    (b"/Launch",     "pdf_external_action"),
+    (b"/SubmitForm", "pdf_external_action"),
+    (b"/ImportData", "pdf_external_action"),
+]
+
+# Regex used to reduce false positives on short operators like /JS and /AA.
+# In real PDFs these operators appear as PDF name tokens — they are preceded
+# by whitespace, a line start, or certain delimiters (<<, [, /) and
+# followed by whitespace or a delimiter.  We compile lazily.
+_PDF_TOKEN_BOUNDARY = rb'(?:^|[\s<\[/])'
+_PDF_TOKEN_TRAIL    = rb'(?:[\s>/\]\r\n(]|$)'
+
+
+def detect_pdf_javascript(pdf_bytes: bytes | bytearray) -> dict:
+    """Scan raw PDF bytes for JavaScript and dangerous action operators.
+
+    This performs a fast byte-level scan — no PDF structure parsing is
+    required.  It looks for the PDF name-object operators that indicate
+    the presence of JavaScript code or auto-execute actions.
+
+    Parameters
+    ----------
+    pdf_bytes : bytes | bytearray
+        Raw bytes of a PDF file (or any data — non-PDF input is handled
+        gracefully).
+
+    Returns
+    -------
+    dict
+        ``has_javascript`` : bool
+            True if any JS/action indicator was found.
+        ``js_indicators`` : list[str]
+            Names of the operators found (e.g. ``["/JS", "/OpenAction"]``).
+        ``anomaly_flags`` : set[str]
+            Anomaly flag strings for downstream pipeline consumption.
+            Possible values: ``"pdf_javascript"``, ``"pdf_auto_action"``,
+            ``"pdf_external_action"``.
+    """
+    found_operators: list[str] = []
+    flags: set[str] = set()
+
+    if not pdf_bytes:
+        return {
+            "has_javascript": False,
+            "js_indicators": found_operators,
+            "anomaly_flags": flags,
+        }
+
+    for operator_bytes, flag_name in _PDF_JS_INDICATORS:
+        # Quick pre-check: is the operator even present?
+        if operator_bytes not in pdf_bytes:
+            continue
+        # Contextual check: verify the operator appears as a proper PDF
+        # name token (not as a substring of a longer word or a comment).
+        pattern = _PDF_TOKEN_BOUNDARY + re.escape(operator_bytes) + _PDF_TOKEN_TRAIL
+        if re.search(pattern, pdf_bytes):
+            op_str = operator_bytes.decode("ascii")
+            if op_str not in found_operators:
+                found_operators.append(op_str)
+            flags.add(flag_name)
+
+    return {
+        "has_javascript": len(found_operators) > 0,
+        "js_indicators": found_operators,
+        "anomaly_flags": flags,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -215,6 +305,24 @@ def extract_text_from_document(
         )
 
     result = extractor(doc_data, eff_max_pages)
+
+    # --- PDF JavaScript / action detection -----------------------------------
+    if dtype == "pdf":
+        js_result = detect_pdf_javascript(doc_data)
+        if js_result["has_javascript"]:
+            result.warnings.append(
+                "PDF JavaScript/action indicators found: {}".format(
+                    ", ".join(js_result["js_indicators"])
+                )
+            )
+            # Store anomaly flags in metadata for downstream consumption
+            if not hasattr(result, "metadata") or result.metadata is None:
+                result.metadata = {}
+            result.metadata["pdf_js_detection"] = js_result
+            # Also add the anomaly flag names directly to warnings so they
+            # can be picked up by sanitizer.py as anomaly flags.
+            for flag in sorted(js_result["anomaly_flags"]):
+                result.warnings.append("flag:{}".format(flag))
 
     # --- Post-extraction text size cap ---------------------------------------
     if len(result.text.encode("utf-8", errors="replace")) > eff_max_text:

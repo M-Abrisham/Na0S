@@ -1493,4 +1493,271 @@ Layer 20 automates the lifecycle of the threat taxonomy: syncing with external s
 
 **Totals**: P0: 30 | P1: 75 | P2: 82 tasks across 20 layers + Vision
 **New Layers**: L17 Doc Scanning, L18 RAG Security, L19 Agent/MCP, L20 Taxonomy Automation
-**Last Updated**: 2026-02-14
+**Last Updated**: 2026-02-16
+
+---
+
+## README Overhaul — Interactive GitHub Showcase
+
+**Goal**: Transform the README into a world-class, visually stunning, game-inspired interactive showcase that makes the project stand out on GitHub.
+
+**Research Sources**: [awesome-readme](https://github.com/matiassingers/awesome-readme), [10 Standout GitHub READMEs](https://dev.to/github/10-standout-github-profile-readmes-h2o), [mehdiamiri1440 profile](https://github.com/mehdiamiri1440), [best-github-profile-readme](https://github.com/MaxRohowsky/best-github-profile-readme), [github-pages-examples](https://github.com/collections/github-pages-examples)
+
+**Status**: In progress — research complete, implementation pending
+
+---
+
+### Phase 0: Critical Fixes (Must Do Before Anything Else)
+
+- [x] **P0-1**: Merge `feature/probe-architecture` into `main` so the new README is visible on the repo landing page
+- [x] **P0-2**: Add a `LICENSE` file to the repo root (MIT) — created MIT LICENSE at repo root
+- [x] **P0-3**: Replace static CI badge with live GitHub Actions badge — done in README overhaul
+- [x] **P0-4**: Replace broken `github-readme-stats.vercel.app` with `streak-stats.demolab.com` — done in README overhaul
+- [x] **P0-5**: Fix "20 layers" claim → "15 built | 5 planned" in badges, banner, Mermaid — done in README overhaul
+- [x] **P0-6**: Update stale numbers: tests 821+, source modules updated — done in README overhaul
+
+---
+
+### Phase 1: Visual Impact — Quick Wins (Low Effort, High Impact)
+
+#### 1.1 Capsule Render Animated Banner
+- [ ] Replace plain typing SVG header with [capsule-render](https://github.com/kyechan99/capsule-render) `venom` type banner
+- [ ] Colors: dark gradient `0:0d1117,50:E63946,100:1D3557` (matches project red/navy palette)
+- [ ] Include project title + subtitle with `twinkling` animation
+- [ ] Add matching footer banner with `section=footer&type=waving`
+- [ ] Embed code:
+```markdown
+![Header](https://capsule-render.vercel.app/api?type=venom&color=0:0d1117,50:E63946,100:1D3557&height=300&section=header&text=AI%20Prompt%20Injection%20Detector&fontSize=40&fontColor=F1FAEE&animation=twinkling&desc=20-Layer%20Defense%20%7C%20103%2B%20Attack%20Techniques&descAlignY=62&descSize=18)
+```
+
+#### 1.2 Enhanced Typing SVG — Threat Feed Style
+- [ ] Add a SECOND typing SVG lower in the README that simulates a live threat feed
+- [ ] Cycle through real attack examples being blocked: `"BLOCKED: Ignore all previous... → D1.1"`, `"BLOCKED: You are now DAN → D2.1"`, `"SAFE: What is the capital? → Whitelist"`
+- [ ] Use `font=Fira+Code&size=14&color=E63946&background=0D111700`
+
+#### 1.3 Security-Themed Shields.io Badges
+- [ ] Add custom SVG logo badges (shield icon encoded in base64):
+  - `threats_blocked-103+-E63946` with shield logo
+  - `ML_accuracy-94.5%-3fb950` with checkmark logo
+  - `false_positive_rate-<2%-58a6ff`
+- [ ] Add dynamic license badge: `https://img.shields.io/github/license/M-Abrisham/AI-Prompt-Injection-Detector`
+- [ ] Add "Try It Live" call-to-action badge (link to Colab/demo when available)
+
+#### 1.4 Badge-Style Section Dividers
+- [ ] Replace plain `## Heading` with for-the-badge section headers:
+  - `![ARCHITECTURE](https://img.shields.io/badge/ARCHITECTURE-20_LAYER_DEFENSE-1D3557?style=for-the-badge&labelColor=E63946)`
+  - `![THREATS](https://img.shields.io/badge/THREAT_TAXONOMY-19_CATEGORIES-457B9D?style=for-the-badge&labelColor=FF6B35)`
+
+#### 1.5 ASCII Art Terminal Header (Alternative/Supplement)
+- [ ] Add a figlet-style ASCII art block in a code fence for terminal/hacker aesthetic
+- [ ] Include project stats in ASCII: `20 Layers | 103+ Techniques | 126K Samples`
+
+#### 1.6 Progress Bars for Layer Implementation
+- [ ] Add Unicode progress bars showing each layer's completion status:
+```markdown
+| Layer | Status | Progress |
+|-------|--------|----------|
+| L0: Input Sanitizer | Complete | `[####################] 100%` |
+| L1: Rules Engine | Minimal | `[###-----------------]  15%` |
+| L4: ML Classifier | Trained | `[#################---]  85%` |
+```
+
+#### 1.7 Threat Heatmap Table with Color Badges
+- [ ] Transform taxonomy table: add severity badges (`CRITICAL`/`HIGH`/`MEDIUM`) and coverage badges (`FULL`/`PARTIAL`/`PLANNED`)
+- [ ] Use shields.io inline badges for color coding per row
+
+---
+
+### Phase 2: Diagrams & Data Visualization (Medium Effort, Very High Impact)
+
+#### 2.1 Enhanced Mermaid Diagrams
+- [ ] Add `%%{init: {'theme':'neutral'}}%%` to ensure consistent rendering across light/dark GitHub themes
+- [ ] Fix `{{ }}` hexagon node to `{ }` diamond for verdict
+- [ ] Add dashed edges from Infrastructure subgraph to main pipeline
+- [ ] Add a **Mermaid pie chart** for attack category distribution:
+```mermaid
+pie title Attack Category Distribution
+    "D1: Instruction Override" : 20
+    "D2: Persona Hijack" : 4
+    "D5: Unicode Evasion" : 7
+    "E1: System Prompt Extract" : 6
+    "Other Categories" : 66
+```
+- [ ] Add a **Mermaid sequence diagram** showing a real attack being detected step-by-step across layers
+
+#### 2.2 Radar Chart — Threat Coverage Visualization
+- [ ] Generate a radar/spider chart SVG using matplotlib showing coverage across 19 categories
+- [ ] Each axis = attack category (D1, D2, D5, E1, etc.), filled area = detection coverage
+- [ ] Dark theme (background `#0d1117`, lines `#E63946`)
+- [ ] Commit as `assets/threat-radar.svg`
+- [ ] Python script: `scripts/generate_readme_assets.py`
+
+#### 2.3 Custom SVG Scanner Animation (Flagship Visual)
+- [ ] Create a custom animated SVG (`assets/scanner-animation.svg`) that looks like a real-time security scanner
+- [ ] Terminal-style green-on-dark text showing layer-by-layer scan output
+- [ ] Animated scan line sweeping across
+- [ ] Blinking red "THREAT DETECTED" verdict
+- [ ] Uses CSS `@keyframes` inside SVG (GitHub renders this)
+- [ ] This replaces the static text "Detection in Action" block with a living animation
+
+#### 2.4 Dark/Light Mode Support
+- [ ] Create dual-mode versions of all custom visual assets using `<picture>` element:
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.svg" />
+  <source media="(prefers-color-scheme: light)" srcset="assets/architecture-light.svg" />
+  <img alt="Architecture" src="assets/architecture-dark.svg" />
+</picture>
+```
+
+---
+
+### Phase 3: Animations & Dynamic Content (Medium-High Effort)
+
+#### 3.1 Terminal Demo GIF
+- [ ] Record a real terminal session using [VHS](https://github.com/charmbracelet/vhs) or [asciinema](https://asciinema.org/) or [Terminalizer](https://github.com/faressoft/terminalizer)
+- [ ] Show actual `scan()` and `CascadeDetector.scan()` calls with real prompts being classified
+- [ ] Include both safe and malicious examples
+- [ ] Export as GIF, commit to `assets/demo.gif`
+- [ ] Embed prominently below the architecture diagram
+
+#### 3.2 Contribution Snake Animation
+- [ ] Set up [Platane/snk](https://github.com/Platane/snk) GitHub Action (runs daily via cron)
+- [ ] Generate dark + light mode snake SVGs
+- [ ] Embed at bottom of README using `<picture>` for theme support
+- [ ] GitHub Action workflow file: `.github/workflows/snake.yml`
+
+#### 3.3 GitHub Stats Widgets (Fix + Enhance)
+- [ ] Replace broken `github-readme-stats.vercel.app` with self-hosted Vercel instance or use [github-readme-streak-stats](https://streak-stats.demolab.com/)
+- [ ] Add streak stats card (`tokyonight` theme)
+- [ ] Add top languages donut chart
+- [ ] Add repo-specific pin card
+- [ ] Add [activity graph](https://github-readme-activity-graph.vercel.app/) with `tokyo-night` theme
+- [ ] Add [github-profile-trophy](https://github-profile-trophy.vercel.app/) with `matrix` theme (green-on-black, security aesthetic)
+
+#### 3.4 Animated Shield Rings SVG (Stretch Goal)
+- [ ] Create a concentric-rings SVG showing the defense-in-depth concept
+- [ ] Each ring = layer group (Input → Rules → ML → Decision → Output)
+- [ ] Rings pulse with CSS `@keyframes` animation
+- [ ] Center shows "LLM" being protected
+- [ ] Commit as `assets/shield-rings.svg`
+
+---
+
+### Phase 4: Content & Credibility (Medium Effort)
+
+#### 4.1 Benchmark Results Section
+- [ ] Run the model on test set and generate precision/recall/F1/accuracy numbers
+- [ ] Generate a confusion matrix image (matplotlib) → `assets/confusion-matrix.svg`
+- [ ] Generate ROC curve or precision-recall curve → `assets/roc-curve.svg`
+- [ ] Add a "Performance" section with these visuals + numbers table
+
+#### 4.2 Skill Icons Tech Stack
+- [ ] Replace HTML table tech stack with [skillicons.dev](https://skillicons.dev/) strip:
+```markdown
+![Tech Stack](https://skillicons.dev/icons?i=python,sklearn,numpy,tensorflow,docker,github,linux&theme=dark)
+```
+- [ ] Cleaner, more consistent than individual devicon images
+
+#### 4.3 OWASP/Standards Mapping Enhancement
+- [ ] Add clickable badge links for each framework
+- [ ] Add a mapping diagram (Mermaid or table) showing: `Your Technique → OWASP LLM01 → MITRE ATLAS T0051`
+
+#### 4.4 Project Governance Files
+- [ ] Create `SECURITY.md` — responsible disclosure policy (critical for a security tool)
+- [ ] Create `CONTRIBUTING.md` — how to contribute, coding standards, PR process
+- [ ] Create `CODE_OF_CONDUCT.md` — standard Contributor Covenant
+- [ ] Add GitHub issue templates (`.github/ISSUE_TEMPLATE/bug_report.md`, `feature_request.md`)
+
+#### 4.5 Socialify Repo Card
+- [ ] Generate a social card via [socialify.git.ci](https://socialify.git.ci/) for the repo
+- [ ] Includes description, stars, forks, language — auto-generated open graph image
+
+---
+
+### Phase 5: Layout & Polish (Low Effort, Professional Finish)
+
+#### 5.1 Rainbow/Wave Section Dividers
+- [ ] Replace plain `---` dividers with animated wave dividers (capsule-render or custom SVG)
+- [ ] Use consistent color palette throughout: `#0d1117` (bg), `#E63946` (red accent), `#1D3557` (navy), `#457B9D` (blue), `#2A9D8F` (teal), `#F1C40F` (gold)
+
+#### 5.2 GitHub Admonitions
+- [ ] Use `> [!WARNING]`, `> [!NOTE]`, `> [!TIP]` for callouts (security warnings, prerequisites, tips)
+
+#### 5.3 Keyboard Shortcut Display
+- [ ] Use `<kbd>` tags for any CLI shortcuts or hotkeys: `<kbd>Ctrl</kbd>+<kbd>C</kbd>`
+
+#### 5.4 Footnotes for Academic References
+- [ ] Add footnotes `[^1]` for OWASP, AVID, LMRC, MITRE ATLAS paper references
+
+#### 5.5 Table of Contents Cleanup
+- [ ] Ensure all anchor links work after section name changes
+- [ ] Add emoji prefixes to TOC entries for visual scanning
+
+#### 5.6 Animated GIFs in Section Headers
+- [ ] Add small inline animated GIFs (25-35px) in section headers (like mehdiamiri1440 does)
+- [ ] Source: Giphy search for security/shield/lock icons
+
+---
+
+### Phase 6: "Outside the Box" — Game-Like Elements
+
+#### 6.1 RPG-Style "Defense Stats" Card
+- [ ] Create a custom SVG styled like an RPG character sheet:
+  - Attack Power: 103+ techniques detected
+  - Defense Rating: 20 layers
+  - Training XP: 126,245 samples
+  - Test Coverage: 821+ tests
+  - Level: v1.0
+
+#### 6.2 "Boss Battle" Attack Visualization
+- [ ] Create an infographic showing famous jailbreak attacks (DAN, AIM, Developer Mode) being defeated by specific layers
+- [ ] Style like a fighting game matchup: "Layer 0 vs Unicode Evasion → BLOCKED"
+
+#### 6.3 Interactive Contribution Calendar Art (Optional)
+- [ ] Use strategic commit timing to create pixel art in the contribution graph (shield icon)
+- [ ] Automated via [gitfiti](https://github.com/gelstudios/gitfiti) or similar
+
+---
+
+### Implementation Order (Recommended)
+
+**Sprint 1 — Quick Wins (1-2 hours)**:
+Phase 0 (all), 1.1, 1.2, 1.3, 1.5, 1.6, 1.7
+
+**Sprint 2 — Visual Power (half day)**:
+2.1, 2.2, 2.3, 3.3, 4.2
+
+**Sprint 3 — Flagship Assets (1 day)**:
+3.1, 2.4, 3.2, 4.1
+
+**Sprint 4 — Content & Governance (half day)**:
+4.3, 4.4, 4.5, 5.1-5.6
+
+**Sprint 5 — Creative Stretch Goals**:
+3.4, 6.1, 6.2, 6.3
+
+---
+
+### Services & Tools Inventory
+
+| # | Tool | URL | Purpose |
+|---|------|-----|---------|
+| 1 | Capsule Render | `https://github.com/kyechan99/capsule-render` | Animated SVG banners (header/footer) |
+| 2 | Typing SVG | `https://readme-typing-svg.demolab.com` | Animated typing text |
+| 3 | Shields.io | `https://shields.io` | Dynamic & static badges |
+| 4 | Skill Icons | `https://skillicons.dev` | Tech stack icon strips |
+| 5 | Mermaid | `https://mermaid.js.org` | Native GitHub diagrams |
+| 6 | GitHub Streak Stats | `https://streak-stats.demolab.com` | Contribution streaks |
+| 7 | Activity Graph | `https://github-readme-activity-graph.vercel.app` | Commit activity chart |
+| 8 | Profile Trophy | `https://github-profile-trophy.vercel.app` | Achievement trophies |
+| 9 | Platane/snk | `https://github.com/Platane/snk` | Snake contribution animation |
+| 10 | VHS | `https://github.com/charmbracelet/vhs` | Terminal recording → GIF |
+| 11 | Socialify | `https://socialify.git.ci` | Social card generator |
+| 12 | Carbon/Ray.so | `https://carbon.now.sh` / `https://ray.so` | Code screenshot images |
+| 13 | Matplotlib | Python library | Radar chart, confusion matrix |
+| 14 | Custom SVG | Hand-crafted | Scanner animation, shield rings |
+| 15 | Contrib.rocks | `https://contrib.rocks` | Contributor avatar grid |
+| 16 | Star History | `https://star-history.com` | Star growth chart |
+
+---

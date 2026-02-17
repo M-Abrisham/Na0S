@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+  <style>
+    @keyframes pulseRing1 {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+    @keyframes pulseRing2 {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+    @keyframes pulseRing3 {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+    @keyframes pulseRing4 {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+    @keyframes pulseRing5 {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+    @keyframes coreGlow {
+      0%, 100% { filter: drop-shadow(0 0 6px #F1C40F55); }
+      50% { filter: drop-shadow(0 0 18px #F1C40Faa) drop-shadow(0 0 30px #F1C40F55); }
+    }
+    @keyframes attackDot1 {
+      0% { opacity: 0; transform: translate(0,0); }
+      10% { opacity: 1; }
+      40% { opacity: 1; transform: translate(40px, 30px); }
+      50% { opacity: 0; transform: translate(40px, 30px); }
+      100% { opacity: 0; }
+    }
+    @keyframes attackDot2 {
+      0% { opacity: 0; transform: translate(0,0); }
+      10% { opacity: 1; }
+      35% { opacity: 1; transform: translate(-35px, 25px); }
+      45% { opacity: 0; transform: translate(-35px, 25px); }
+      100% { opacity: 0; }
+    }
+    @keyframes attackDot3 {
+      0%, 40% { opacity: 0; transform: translate(0,0); }
+      50% { opacity: 1; }
+      75% { opacity: 1; transform: translate(20px, -40px); }
+      85% { opacity: 0; transform: translate(20px, -40px); }
+      100% { opacity: 0; }
+    }
+    @keyframes blockFlash {
+      0%, 39%, 51%, 100% { opacity: 0; }
+      40%, 50% { opacity: 0.6; }
+    }
+    @keyframes blockFlash2 {
+      0%, 34%, 46%, 100% { opacity: 0; }
+      35%, 45% { opacity: 0.6; }
+    }
+    @keyframes blockFlash3 {
+      0%, 74%, 86%, 100% { opacity: 0; }
+      75%, 85% { opacity: 0.6; }
+    }
+    @keyframes radarSweep {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .ring5 { animation: pulseRing5 3.2s ease-in-out infinite; }
+    .ring4 { animation: pulseRing4 3.2s ease-in-out 0.4s infinite; }
+    .ring3 { animation: pulseRing3 3.2s ease-in-out 0.8s infinite; }
+    .ring2 { animation: pulseRing2 3.2s ease-in-out 1.2s infinite; }
+    .ring1 { animation: pulseRing1 3.2s ease-in-out 1.6s infinite; }
+    .core { animation: coreGlow 2.5s ease-in-out infinite; }
+    .attack1 { animation: attackDot1 8s ease-in-out infinite; }
+    .attack2 { animation: attackDot2 8s ease-in-out 2s infinite; }
+    .attack3 { animation: attackDot3 8s ease-in-out infinite; }
+    .block1 { animation: blockFlash 8s ease-in-out infinite; }
+    .block2 { animation: blockFlash2 8s ease-in-out 2s infinite; }
+    .block3 { animation: blockFlash3 8s ease-in-out infinite; }
+    .radar { animation: radarSweep 8s linear infinite; transform-origin: 300px 300px; }
+
+    .label { font-family: 'Fira Code', 'Cascadia Code', 'SF Mono', 'Consolas', monospace; }
+
+    @media (prefers-color-scheme: light) {
+      .bg-fill { fill: #ffffff; }
+      .label-muted { fill: #57606a; }
+    }
+    @media (prefers-color-scheme: dark) {
+      .bg-fill { fill: #0d1117; }
+      .label-muted { fill: #8b949e; }
+    }
+  </style>
+
+  <defs>
+    <radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#F1C40F" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#F1C40F" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ring5grad" cx="50%" cy="50%" r="50%">
+      <stop offset="85%" stop-color="#1D3557" stop-opacity="0"/>
+      <stop offset="92%" stop-color="#1D3557" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#1D3557" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ring4grad" cx="50%" cy="50%" r="50%">
+      <stop offset="85%" stop-color="#457B9D" stop-opacity="0"/>
+      <stop offset="92%" stop-color="#457B9D" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#457B9D" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ring3grad" cx="50%" cy="50%" r="50%">
+      <stop offset="85%" stop-color="#E63946" stop-opacity="0"/>
+      <stop offset="92%" stop-color="#E63946" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#E63946" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sweepGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#00ff41" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#00ff41" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background (adapts to theme) -->
+  <rect width="600" height="600" rx="12" class="bg-fill" fill="#0d1117"/>
+
+  <!-- Ring 5 (outermost) - INPUT PROCESSING L0 -->
+  <g class="ring5">
+    <circle cx="300" cy="300" r="265" fill="none" stroke="#1D3557" stroke-width="2.5" stroke-dasharray="8,4" opacity="0.8"/>
+    <circle cx="300" cy="300" r="265" fill="url(#ring5grad)"/>
+    <circle cx="300" cy="300" r="275" fill="none" stroke="#1D3557" stroke-width="0.5" opacity="0.3"/>
+  </g>
+
+  <!-- Ring 4 - PATTERN MATCHING L1,L2,L3 -->
+  <g class="ring4">
+    <circle cx="300" cy="300" r="215" fill="none" stroke="#457B9D" stroke-width="2.5" stroke-dasharray="6,4" opacity="0.8"/>
+    <circle cx="300" cy="300" r="215" fill="url(#ring4grad)"/>
+    <circle cx="300" cy="300" r="225" fill="none" stroke="#457B9D" stroke-width="0.5" opacity="0.3"/>
+  </g>
+
+  <!-- Ring 3 - ML ENSEMBLE L4,L5 -->
+  <g class="ring3">
+    <circle cx="300" cy="300" r="165" fill="none" stroke="#E63946" stroke-width="2.5" stroke-dasharray="5,3" opacity="0.8"/>
+    <circle cx="300" cy="300" r="165" fill="url(#ring3grad)"/>
+    <circle cx="300" cy="300" r="173" fill="none" stroke="#E63946" stroke-width="0.5" opacity="0.3"/>
+  </g>
+
+  <!-- Ring 2 - DECISION CASCADE L6,L7,L8 -->
+  <g class="ring2">
+    <circle cx="300" cy="300" r="115" fill="none" stroke="#FF6B35" stroke-width="2.5" stroke-dasharray="4,3" opacity="0.8"/>
+    <circle cx="300" cy="300" r="123" fill="none" stroke="#FF6B35" stroke-width="0.5" opacity="0.3"/>
+  </g>
+
+  <!-- Ring 1 (innermost) - OUTPUT DEFENSE L9,L10 -->
+  <g class="ring1">
+    <circle cx="300" cy="300" r="70" fill="none" stroke="#2A9D8F" stroke-width="2.5" stroke-dasharray="3,2" opacity="0.8"/>
+    <circle cx="300" cy="300" r="78" fill="none" stroke="#2A9D8F" stroke-width="0.5" opacity="0.3"/>
+  </g>
+
+  <!-- Radar sweep line -->
+  <g class="radar">
+    <line x1="300" y1="300" x2="300" y2="35" stroke="#00ff41" stroke-width="1" opacity="0.15"/>
+    <path d="M300,300 L290,50 A270,270 0 0,1 310,50 Z" fill="#00ff41" opacity="0.04"/>
+  </g>
+
+  <!-- Core glow -->
+  <g class="core">
+    <circle cx="300" cy="300" r="42" fill="url(#coreGrad)"/>
+    <circle cx="300" cy="300" r="36" fill="#0d1117" stroke="#F1C40F" stroke-width="2"/>
+    <text x="300" y="305" text-anchor="middle" class="label" fill="#F1C40F" font-size="16" font-weight="bold">LLM</text>
+  </g>
+
+  <!-- Ring labels -->
+  <!-- Ring 1 label -->
+  <text x="300" y="242" text-anchor="middle" class="label" fill="#2A9D8F" font-size="9" font-weight="600">OUTPUT DEFENSE</text>
+  <text x="300" y="253" text-anchor="middle" class="label label-muted" fill="#8b949e" font-size="8">L9, L10</text>
+
+  <!-- Ring 2 label -->
+  <text x="300" y="196" text-anchor="middle" class="label" fill="#FF6B35" font-size="9" font-weight="600">DECISION CASCADE</text>
+  <text x="300" y="207" text-anchor="middle" class="label label-muted" fill="#8b949e" font-size="8">L6, L7, L8</text>
+
+  <!-- Ring 3 label -->
+  <text x="300" y="148" text-anchor="middle" class="label" fill="#E63946" font-size="9" font-weight="600">ML ENSEMBLE</text>
+  <text x="300" y="159" text-anchor="middle" class="label label-muted" fill="#8b949e" font-size="8">L4, L5</text>
+
+  <!-- Ring 4 label -->
+  <text x="300" y="98" text-anchor="middle" class="label" fill="#457B9D" font-size="9" font-weight="600">PATTERN MATCHING</text>
+  <text x="300" y="109" text-anchor="middle" class="label label-muted" fill="#8b949e" font-size="8">L1, L2, L3</text>
+
+  <!-- Ring 5 label -->
+  <text x="300" y="50" text-anchor="middle" class="label" fill="#1D3557" font-size="9" font-weight="600">INPUT PROCESSING</text>
+  <text x="300" y="61" text-anchor="middle" class="label label-muted" fill="#8b949e" font-size="8">L0</text>
+
+  <!-- Attack dots coming in from outside -->
+  <!-- Attack 1 - from upper right -->
+  <g class="attack1">
+    <circle cx="520" cy="80" r="4" fill="#E63946"/>
+    <circle cx="520" cy="80" r="7" fill="none" stroke="#E63946" stroke-width="1" opacity="0.5"/>
+  </g>
+  <!-- Block flash 1 at ring 5 -->
+  <circle class="block1" cx="480" cy="130" r="16" fill="none" stroke="#E63946" stroke-width="2" opacity="0"/>
+
+  <!-- Attack 2 - from left -->
+  <g class="attack2">
+    <circle cx="70" cy="250" r="4" fill="#E63946"/>
+    <circle cx="70" cy="250" r="7" fill="none" stroke="#E63946" stroke-width="1" opacity="0.5"/>
+  </g>
+  <!-- Block flash 2 at ring 5 -->
+  <circle class="block2" cx="100" cy="230" r="16" fill="none" stroke="#E63946" stroke-width="2" opacity="0"/>
+
+  <!-- Attack 3 - from bottom -->
+  <g class="attack3">
+    <circle cx="350" cy="560" r="4" fill="#E63946"/>
+    <circle cx="350" cy="560" r="7" fill="none" stroke="#E63946" stroke-width="1" opacity="0.5"/>
+  </g>
+  <!-- Block flash 3 at ring 4 -->
+  <circle class="block3" cx="360" cy="530" r="16" fill="none" stroke="#E63946" stroke-width="2" opacity="0"/>
+
+  <!-- Title at bottom -->
+  <text x="300" y="580" text-anchor="middle" class="label" fill="#c9d1d9" font-size="11" opacity="0.7">DEFENSE-IN-DEPTH &#x2022; 15-LAYER ARCHITECTURE</text>
+</svg>

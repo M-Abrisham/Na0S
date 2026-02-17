@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450">
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes scanLine {
+      0% { transform: translateY(30px); opacity: 0.7; }
+      100% { transform: translateY(420px); opacity: 0; }
+    }
+    @keyframes pulseRed {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    @keyframes glowBox {
+      0%, 100% { filter: drop-shadow(0 0 4px #E63946); }
+      50% { filter: drop-shadow(0 0 12px #E63946) drop-shadow(0 0 20px #E6394688); }
+    }
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+    @keyframes cursorBlink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+
+    .mono { font-family: 'Fira Code', 'Cascadia Code', 'SF Mono', 'Consolas', 'Liberation Mono', monospace; }
+    .line { opacity: 0; animation: fadeIn 0.4s ease forwards; }
+    .line-cmd { animation-delay: 0.5s; }
+    .line-blank { animation-delay: 1.2s; }
+    .line-l0 { animation-delay: 1.6s; }
+    .line-l1 { animation-delay: 2.1s; }
+    .line-l2 { animation-delay: 2.6s; }
+    .line-l3 { animation-delay: 3.1s; }
+    .line-l4 { animation-delay: 3.6s; }
+    .line-l5 { animation-delay: 4.1s; }
+    .line-l6 { animation-delay: 4.6s; }
+    .line-l7 { animation-delay: 5.1s; }
+    .line-box { animation-delay: 5.8s; }
+
+    .scan-beam { animation: scanLine 3s ease-in-out 0.3s infinite; }
+    .verdict-glow { animation: glowBox 1.5s ease-in-out 6.2s infinite; }
+    .malicious-blink { opacity: 0; animation: fadeIn 0.3s ease 6.0s forwards; }
+    .malicious-pulse { animation: pulseRed 0.8s ease-in-out 6.5s infinite; }
+    .cursor { animation: cursorBlink 1s step-end infinite; }
+  </style>
+
+  <defs>
+    <linearGradient id="scanGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#00ff41" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#00ff41" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#00ff41" stop-opacity="0.3"/>
+      <stop offset="70%" stop-color="#00ff41" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#00ff41" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="headerGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c2128"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Terminal outer frame -->
+  <rect x="0" y="0" width="800" height="450" rx="10" ry="10" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+
+  <!-- Terminal header bar -->
+  <rect x="0" y="0" width="800" height="36" rx="10" ry="10" fill="url(#headerGrad)"/>
+  <rect x="0" y="20" width="800" height="16" fill="url(#headerGrad)"/>
+  <line x1="0" y1="36" x2="800" y2="36" stroke="#30363d" stroke-width="1"/>
+
+  <!-- Traffic light dots -->
+  <circle cx="20" cy="18" r="6" fill="#ff5f57"/>
+  <circle cx="40" cy="18" r="6" fill="#febc2e"/>
+  <circle cx="60" cy="18" r="6" fill="#28c840"/>
+
+  <!-- Title bar text -->
+  <text x="400" y="22" text-anchor="middle" class="mono" fill="#8b949e" font-size="12" font-weight="600">AI Prompt Injection Detector v1.0</text>
+
+  <!-- Scan line beam -->
+  <rect class="scan-beam" x="10" y="30" width="780" height="2" fill="url(#scanGrad)" rx="1"/>
+
+  <!-- Command line -->
+  <g class="line line-cmd">
+    <text x="20" y="62" class="mono" fill="#3fb950" font-size="13">$</text>
+    <text x="34" y="62" class="mono" fill="#c9d1d9" font-size="13">detector.scan(</text>
+    <text x="156" y="62" class="mono" fill="#E63946" font-size="13">"Ignore all previous instructions"</text>
+    <text x="456" y="62" class="mono" fill="#c9d1d9" font-size="13">)</text>
+  </g>
+
+  <!-- Blinking cursor after command (visible until lines start) -->
+  <rect class="line line-cmd cursor" x="464" y="50" width="8" height="15" fill="#3fb950" opacity="0.8"/>
+
+  <!-- L0 -->
+  <g class="line line-l0">
+    <text x="20" y="100" class="mono" fill="#2A9D8F" font-size="12.5">[L0]</text>
+    <text x="56" y="100" class="mono" fill="#2A9D8F" font-size="12.5">INPUT SANITIZER</text>
+    <text x="220" y="100" class="mono" fill="#3fb950" font-size="12.5">&#x2713;</text>
+    <text x="238" y="100" class="mono" fill="#c9d1d9" font-size="12.5">Normalized (NFKC)</text>
+    <text x="700" y="100" class="mono" fill="#6e7681" font-size="11">0.2ms</text>
+  </g>
+
+  <!-- L1 -->
+  <g class="line line-l1">
+    <text x="20" y="122" class="mono" fill="#2A9D8F" font-size="12.5">[L1]</text>
+    <text x="56" y="122" class="mono" fill="#2A9D8F" font-size="12.5">RULES ENGINE</text>
+    <text x="220" y="122" class="mono" fill="#F1C40F" font-size="12.5">&#x26A0;</text>
+    <text x="238" y="122" class="mono" fill="#F1C40F" font-size="12.5">MATCH: override</text>
+    <text x="700" y="122" class="mono" fill="#6e7681" font-size="11">0.1ms</text>
+  </g>
+
+  <!-- L2 -->
+  <g class="line line-l2">
+    <text x="20" y="144" class="mono" fill="#2A9D8F" font-size="12.5">[L2]</text>
+    <text x="56" y="144" class="mono" fill="#2A9D8F" font-size="12.5">OBFUSCATION</text>
+    <text x="220" y="144" class="mono" fill="#3fb950" font-size="12.5">&#x2713;</text>
+    <text x="238" y="144" class="mono" fill="#c9d1d9" font-size="12.5">No encoding detected</text>
+    <text x="700" y="144" class="mono" fill="#6e7681" font-size="11">0.1ms</text>
+  </g>
+
+  <!-- L3 -->
+  <g class="line line-l3">
+    <text x="20" y="166" class="mono" fill="#2A9D8F" font-size="12.5">[L3]</text>
+    <text x="56" y="166" class="mono" fill="#2A9D8F" font-size="12.5">STRUCTURAL</text>
+    <text x="220" y="166" class="mono" fill="#F1C40F" font-size="12.5">&#x26A0;</text>
+    <text x="238" y="166" class="mono" fill="#F1C40F" font-size="12.5">imperative=1, negation=1</text>
+    <text x="700" y="166" class="mono" fill="#6e7681" font-size="11">0.3ms</text>
+  </g>
+
+  <!-- L4 -->
+  <g class="line line-l4">
+    <text x="20" y="188" class="mono" fill="#2A9D8F" font-size="12.5">[L4]</text>
+    <text x="56" y="188" class="mono" fill="#2A9D8F" font-size="12.5">ML-TFIDF</text>
+    <text x="220" y="188" class="mono" fill="#F1C40F" font-size="12.5">&#x26A0;</text>
+    <text x="238" y="188" class="mono" fill="#F1C40F" font-size="12.5">Score: 0.945</text>
+    <text x="700" y="188" class="mono" fill="#6e7681" font-size="11">1.2ms</text>
+  </g>
+
+  <!-- L5 -->
+  <g class="line line-l5">
+    <text x="20" y="210" class="mono" fill="#2A9D8F" font-size="12.5">[L5]</text>
+    <text x="56" y="210" class="mono" fill="#2A9D8F" font-size="12.5">ML-EMBEDDING</text>
+    <text x="220" y="210" class="mono" fill="#F1C40F" font-size="12.5">&#x26A0;</text>
+    <text x="238" y="210" class="mono" fill="#F1C40F" font-size="12.5">Score: 0.912</text>
+    <text x="700" y="210" class="mono" fill="#6e7681" font-size="11">3.1ms</text>
+  </g>
+
+  <!-- L6 -->
+  <g class="line line-l6">
+    <text x="20" y="232" class="mono" fill="#2A9D8F" font-size="12.5">[L6]</text>
+    <text x="56" y="232" class="mono" fill="#2A9D8F" font-size="12.5">CASCADE</text>
+    <text x="220" y="232" class="mono" fill="#F1C40F" font-size="12.5">&#x26A0;</text>
+    <text x="238" y="232" class="mono" fill="#F1C40F" font-size="12.5">Weighted: 0.931 (HIGH)</text>
+    <text x="700" y="232" class="mono" fill="#6e7681" font-size="11">0.1ms</text>
+  </g>
+
+  <!-- L7 -->
+  <g class="line line-l7">
+    <text x="20" y="254" class="mono" fill="#2A9D8F" font-size="12.5">[L7]</text>
+    <text x="56" y="254" class="mono" fill="#2A9D8F" font-size="12.5">LLM JUDGE</text>
+    <text x="220" y="254" class="mono" fill="#6e7681" font-size="12.5">&#x2014;</text>
+    <text x="238" y="254" class="mono" fill="#6e7681" font-size="12.5">SKIPPED (confidence &gt; 0.85)</text>
+    <text x="700" y="254" class="mono" fill="#6e7681" font-size="11">&#x2014;</text>
+  </g>
+
+  <!-- Verdict box -->
+  <g class="line line-box verdict-glow">
+    <!-- Outer double border -->
+    <rect x="18" y="280" width="560" height="100" rx="3" fill="#E6394610" stroke="#E63946" stroke-width="2.5"/>
+    <rect x="22" y="284" width="552" height="92" rx="2" fill="none" stroke="#E63946" stroke-width="0.5" opacity="0.5"/>
+
+    <!-- Line 1: VERDICT -->
+    <text x="36" y="312" class="mono" fill="#c9d1d9" font-size="13">VERDICT:</text>
+    <rect x="126" y="300" width="16" height="14" rx="1" fill="#E63946"/>
+    <text x="148" y="312" class="mono" fill="#E63946" font-size="13" font-weight="bold">MALICIOUS (93.1%)</text>
+
+    <!-- Line 2: Category -->
+    <text x="36" y="336" class="mono" fill="#c9d1d9" font-size="13">Category:</text>
+    <text x="140" y="336" class="mono" fill="#F1C40F" font-size="13">D1 &#x2014; Instruction Override</text>
+
+    <!-- Line 3: Technique -->
+    <text x="36" y="360" class="mono" fill="#c9d1d9" font-size="13">Technique:</text>
+    <text x="148" y="360" class="mono" fill="#F1C40F" font-size="13">D1.1 &#x2014; Direct Override Command</text>
+  </g>
+
+  <!-- Pulsing MALICIOUS overlay for extra emphasis -->
+  <g class="malicious-blink">
+    <rect x="126" y="300" width="16" height="14" rx="1" fill="#E63946" class="malicious-pulse"/>
+    <text x="148" y="312" class="mono malicious-pulse" fill="#E63946" font-size="13" font-weight="bold">MALICIOUS (93.1%)</text>
+  </g>
+
+  <!-- Bottom status bar -->
+  <g class="line" style="animation-delay: 6.5s;">
+    <line x1="0" y1="420" x2="800" y2="420" stroke="#30363d" stroke-width="1"/>
+    <text x="20" y="440" class="mono" fill="#6e7681" font-size="10">Total: 5.1ms | Layers: 8/15 | Threat DB: v2.1 | 103 techniques loaded</text>
+    <text x="720" y="440" class="mono" fill="#3fb950" font-size="10">READY</text>
+    <rect class="cursor" x="754" y="430" width="6" height="11" fill="#3fb950"/>
+  </g>
+</svg>

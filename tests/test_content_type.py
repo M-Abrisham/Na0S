@@ -5,12 +5,16 @@ Run: python -m unittest tests/test_content_type.py -v
 
 import unittest
 
+import base64
+
 from src.layer0.content_type import (
     ContentTypeResult,
     detect_content_type,
     sniff_binary,
     _BASE64_BLOB_RE,
     _DATA_URI_RE,
+    _decode_and_rescan,
+    _BASE64_MAX_ENCODED_LEN,
 )
 
 
@@ -75,10 +79,61 @@ class TestExecutables(unittest.TestCase):
         self.assertTrue(r.reject)
 
     def test_java_class(self):
-        r = detect_content_type(_pad(b"\xca\xfe\xba\xbe"))
+        # Java 8 class: magic + minor=0x0000 + major=0x0034 (52)
+        r = detect_content_type(_pad(b"\xca\xfe\xba\xbe\x00\x00\x00\x34"))
         self.assertEqual(r.detected_type, "java_class")
         self.assertTrue(r.reject)
         self.assertIn("embedded_java_class", r.flags)
+
+    def test_java_class_short_data(self):
+        """When only 4 bytes available, default to java_class."""
+        r = detect_content_type(b"\xca\xfe\xba\xbe")
+        self.assertEqual(r.detected_type, "java_class")
+        self.assertTrue(r.reject)
+
+    def test_java_class_version_check(self):
+        """Java class with major version 52 (Java 8) must be java_class."""
+        # 0xCAFEBABE + minor=0x0000 + major=0x0034 (52)
+        data = b"\xca\xfe\xba\xbe\x00\x00\x00\x34" + b"\x00" * 56
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "java_class")
+        self.assertEqual(r.mime_type, "application/java")
+        self.assertEqual(r.tier, "CRITICAL")
+        self.assertTrue(r.reject)
+        self.assertIn("embedded_java_class", r.flags)
+        self.assertIn("embedded_executable", r.flags)
+
+    def test_java_class_java11(self):
+        """Java 11 class: major version 55 (0x0037)."""
+        data = b"\xca\xfe\xba\xbe\x00\x00\x00\x37" + b"\x00" * 56
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "java_class")
+
+    def test_java_class_java22(self):
+        """Java 22 class: major version 66 (0x0042) — upper bound."""
+        data = b"\xca\xfe\xba\xbe\x00\x00\x00\x42" + b"\x00" * 56
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "java_class")
+
+    def test_macho_universal_detected(self):
+        """Mach-O Universal (fat binary): 0xCAFEBABE + narch=2.
+        Major version at bytes 6-7 would be 0x0002 (2), well below 45,
+        so it must NOT be classified as java_class."""
+        data = b"\xca\xfe\xba\xbe\x00\x00\x00\x02" + b"\x00" * 56
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "macho_universal")
+        self.assertEqual(r.mime_type, "application/x-mach-binary")
+        self.assertEqual(r.tier, "CRITICAL")
+        self.assertEqual(r.category, "embedded_executable")
+        self.assertTrue(r.reject)
+        self.assertIn("embedded_macho", r.flags)
+        self.assertIn("embedded_executable", r.flags)
+
+    def test_macho_universal_3_archs(self):
+        """Mach-O Universal with 3 architectures."""
+        data = b"\xca\xfe\xba\xbe\x00\x00\x00\x03" + b"\x00" * 56
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "macho_universal")
 
     def test_wasm(self):
         r = detect_content_type(_pad(b"\x00asm"))
@@ -89,6 +144,31 @@ class TestExecutables(unittest.TestCase):
     def test_shebang(self):
         r = detect_content_type(b"#!/bin/bash\necho hello")
         self.assertEqual(r.detected_type, "shebang")
+        self.assertTrue(r.reject)
+        self.assertIn("embedded_shebang", r.flags)
+
+    def test_shebang_with_slash_detected(self):
+        """Real shebang with slash must still be detected."""
+        r = detect_content_type(b"#!/bin/bash\necho hello")
+        self.assertEqual(r.detected_type, "shebang")
+        self.assertEqual(r.tier, "CRITICAL")
+        self.assertTrue(r.reject)
+        self.assertIn("embedded_shebang", r.flags)
+        self.assertIn("embedded_executable", r.flags)
+
+    def test_shebang_without_slash_not_detected(self):
+        """BUG-CT-1: '#!' without '/' is NOT a real shebang — must not be
+        classified as executable.  e.g. '#! Important Note'."""
+        r = detect_content_type(b"#! Important Note")
+        self.assertEqual(r.detected_type, "")
+        self.assertFalse(r.reject)
+        self.assertEqual(r.flags, [])
+
+    def test_shebang_env_detected(self):
+        """Shebang using /usr/bin/env must still be detected."""
+        r = detect_content_type(b"#!/usr/bin/env python3\nimport os\n")
+        self.assertEqual(r.detected_type, "shebang")
+        self.assertEqual(r.tier, "CRITICAL")
         self.assertTrue(r.reject)
         self.assertIn("embedded_shebang", r.flags)
 
@@ -226,7 +306,8 @@ class TestImages(unittest.TestCase):
         self.assertIn("embedded_psd", r.flags)
 
     def test_ico(self):
-        r = detect_content_type(b"\x00\x00\x01\x00" + b"\x00" * 20)
+        # Valid ICO: bytes 0-3 = header, bytes 4-5 = image count (1, LE)
+        r = detect_content_type(b"\x00\x00\x01\x00\x01\x00" + b"\x00" * 20)
         self.assertEqual(r.detected_type, "ico")
         self.assertIn("embedded_ico", r.flags)
 
@@ -237,6 +318,86 @@ class TestImages(unittest.TestCase):
         self.assertEqual(r.tier, "HIGH")
         self.assertIn("embedded_webp", r.flags)
         self.assertIn("embedded_image", r.flags)
+
+
+# ===================================================================
+# BUG-CT-3: BMP and ICO false positive reduction
+# ===================================================================
+
+class TestBmpIcoFalsePositives(unittest.TestCase):
+    """BMP and ICO signatures are short and need secondary validation."""
+
+    # -- BMP false positives --
+
+    def test_bmp_false_positive_text(self):
+        """Text starting with 'BM' must NOT be detected as BMP.
+        Bytes 6-9 won't be \\x00\\x00\\x00\\x00 in normal text."""
+        r = detect_content_type(b"BMP file format specs are documented here")
+        self.assertEqual(r.detected_type, "")
+        self.assertEqual(r.flags, [])
+
+    def test_bmp_false_positive_bmi(self):
+        """Another common 'BM' prefix: 'BMI calculator'."""
+        r = detect_content_type(b"BMI calculator for health tracking")
+        self.assertEqual(r.detected_type, "")
+        self.assertEqual(r.flags, [])
+
+    def test_bmp_valid_header(self):
+        """Proper BMP header with reserved bytes = 0 must still detect."""
+        # BMP header: "BM" + 4-byte file size + 4-byte reserved (all zero)
+        header = b"BM" + b"\x36\x00\x0c\x00" + b"\x00\x00\x00\x00" + b"\x36\x00\x00\x00"
+        r = detect_content_type(header + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "bmp")
+        self.assertEqual(r.tier, "HIGH")
+        self.assertIn("embedded_bmp", r.flags)
+        self.assertIn("embedded_image", r.flags)
+
+    def test_bmp_short_payload_still_matches(self):
+        """BMP with fewer than 10 bytes: cannot validate reserved field,
+        so the match is kept (benefit of the doubt)."""
+        r = detect_content_type(b"BM\x00\x00\x00\x00")  # 6 bytes
+        self.assertEqual(r.detected_type, "bmp")
+
+    # -- ICO false positives --
+
+    def test_ico_false_positive_zero_count(self):
+        """ICO header with image count = 0 is invalid; should NOT match."""
+        r = detect_content_type(b"\x00\x00\x01\x00\x00\x00" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "")
+        self.assertEqual(r.flags, [])
+
+    def test_ico_false_positive_high_count(self):
+        """ICO header with image count > 255 is suspicious; should NOT match."""
+        # image count = 0x0100 = 256 in LE
+        r = detect_content_type(b"\x00\x00\x01\x00\x00\x01" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "")
+        self.assertEqual(r.flags, [])
+
+    def test_ico_valid_single_image(self):
+        """Valid ICO with 1 image must still detect."""
+        r = detect_content_type(b"\x00\x00\x01\x00\x01\x00" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "ico")
+        self.assertEqual(r.tier, "HIGH")
+        self.assertIn("embedded_ico", r.flags)
+        self.assertIn("embedded_image", r.flags)
+
+    def test_ico_valid_multiple_images(self):
+        """Valid ICO with 5 images must still detect."""
+        r = detect_content_type(b"\x00\x00\x01\x00\x05\x00" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "ico")
+        self.assertIn("embedded_ico", r.flags)
+
+    def test_ico_max_valid_count(self):
+        """ICO with image count = 255 (max valid) must still detect."""
+        r = detect_content_type(b"\x00\x00\x01\x00\xff\x00" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "ico")
+        self.assertIn("embedded_ico", r.flags)
+
+    def test_ico_short_payload_still_matches(self):
+        """ICO with fewer than 6 bytes: cannot validate image count,
+        so the match is kept (benefit of the doubt)."""
+        r = detect_content_type(b"\x00\x00\x01\x00")  # 4 bytes only
+        self.assertEqual(r.detected_type, "ico")
 
 
 # ===================================================================
@@ -267,6 +428,26 @@ class TestArchives(unittest.TestCase):
         self.assertEqual(r.detected_type, "bzip2")
         self.assertIn("embedded_bzip2", r.flags)
 
+    def test_xz_detected(self):
+        """XZ archive: magic bytes fd 37 7a 58 5a 00."""
+        r = detect_content_type(b"\xfd7zXZ\x00" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "xz")
+        self.assertEqual(r.mime_type, "application/x-xz")
+        self.assertEqual(r.tier, "HIGH")
+        self.assertIn("embedded_xz", r.flags)
+        self.assertIn("embedded_archive", r.flags)
+        self.assertFalse(r.reject)
+
+    def test_lzma_detected(self):
+        """LZMA archive: magic bytes 5d 00 00."""
+        r = detect_content_type(b"\x5d\x00\x00" + b"\x00" * 20)
+        self.assertEqual(r.detected_type, "lzma")
+        self.assertEqual(r.mime_type, "application/x-lzma")
+        self.assertEqual(r.tier, "HIGH")
+        self.assertIn("embedded_lzma", r.flags)
+        self.assertIn("embedded_archive", r.flags)
+        self.assertFalse(r.reject)
+
     def test_tar(self):
         """TAR: 'ustar' at offset 257."""
         data = b"\x00" * 257 + b"ustar" + b"\x00" * 20
@@ -274,6 +455,71 @@ class TestArchives(unittest.TestCase):
         self.assertEqual(r.detected_type, "tar")
         self.assertIn("embedded_tar", r.flags)
         self.assertIn("embedded_archive", r.flags)
+
+
+# ===================================================================
+# Polyglot file detection
+# ===================================================================
+
+class TestPolyglotDetection(unittest.TestCase):
+    """Polyglot files contain valid signatures for multiple formats."""
+
+    def test_polyglot_pdf_zip(self):
+        """PDF header + PK signature at offset 100 -> polyglot_detected."""
+        data = b"%PDF-1.7" + b"\x00" * 92 + b"PK\x03\x04" + b"\x00" * 50
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "pdf")
+        self.assertIn("polyglot_detected", r.flags)
+        self.assertIn("embedded_pdf", r.flags)
+        self.assertEqual(r.tier, "HIGH")
+
+    def test_polyglot_jpeg_zip(self):
+        """JPEG header + PK signature at offset 100 -> polyglot_detected."""
+        data = b"\xff\xd8\xff\xe0" + b"\x00" * 96 + b"PK\x03\x04" + b"\x00" * 50
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "jpeg")
+        self.assertIn("polyglot_detected", r.flags)
+        self.assertIn("embedded_jpeg", r.flags)
+        self.assertEqual(r.tier, "HIGH")
+
+    def test_non_polyglot_pdf(self):
+        """Normal PDF without extra signatures should NOT be flagged polyglot."""
+        data = b"%PDF-1.7 This is a normal PDF document content here"
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "pdf")
+        self.assertNotIn("polyglot_detected", r.flags)
+        self.assertIn("embedded_pdf", r.flags)
+
+    def test_non_polyglot_jpeg(self):
+        """Normal JPEG without extra signatures should NOT be flagged polyglot."""
+        data = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "jpeg")
+        self.assertNotIn("polyglot_detected", r.flags)
+
+    def test_polyglot_png_zip(self):
+        """PNG header + embedded PK signature -> polyglot_detected."""
+        data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 92 + b"PK\x03\x04" + b"\x00" * 50
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "png")
+        self.assertIn("polyglot_detected", r.flags)
+
+    def test_polyglot_zip_with_pdf_not_flagged(self):
+        """ZIP primary detection: polyglot check for embedded %PDF."""
+        data = b"PK\x03\x04" + b"\x00" * 50 + b"%PDF-1.7" + b"\x00" * 50
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "zip")
+        # ZIP primary should detect embedded %PDF as polyglot
+        self.assertIn("polyglot_detected", r.flags)
+
+    def test_polyglot_tier_upgrade(self):
+        """Polyglot on a MEDIUM-tier format should upgrade tier to HIGH."""
+        # MP4 is MEDIUM tier; adding PK signature should upgrade to HIGH
+        data = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 92 + b"PK\x03\x04" + b"\x00" * 50
+        r = detect_content_type(data)
+        self.assertEqual(r.detected_type, "mp4")
+        self.assertIn("polyglot_detected", r.flags)
+        self.assertEqual(r.tier, "HIGH")
 
 
 # ===================================================================
@@ -559,6 +805,113 @@ class TestDataURIDetection(unittest.TestCase):
         # Only 5 chars of base64 — below the 20-char minimum
         uri = "data:text/html;base64,ABCDE"
         self.assertFalse(_DATA_URI_RE.search(uri))
+
+
+# ===================================================================
+# Base64 decode + re-scan pipeline
+# ===================================================================
+
+class TestBase64DecodeRescan(unittest.TestCase):
+    """Base64-encoded binary payloads should be decoded and re-scanned."""
+
+    def test_base64_blob_decode_pdf(self):
+        """Base64-encode a PDF header, embed in text, verify base64_hidden_document flag."""
+        # Pad to ensure base64 output >= 64 chars (regex minimum)
+        pdf_header = b"%PDF-1.7 fake document content here" + b"\x00" * 30
+        b64 = base64.b64encode(pdf_header).decode("ascii")
+        self.assertGreaterEqual(len(b64), 64, "b64 must be >= 64 chars for regex")
+        text = "Here is some data: " + b64
+        flags = sniff_binary(text)
+        self.assertIn("base64_blob_detected", flags)
+        self.assertIn("base64_hidden_document", flags)
+
+    def test_base64_blob_decode_exe(self):
+        """Base64-encode an EXE (PE) header, verify base64_hidden_executable flag."""
+        exe_header = b"MZ" + b"\x00" * 62  # 64 bytes total
+        b64 = base64.b64encode(exe_header).decode("ascii")
+        text = "Payload: " + b64
+        flags = sniff_binary(text)
+        self.assertIn("base64_blob_detected", flags)
+        self.assertIn("base64_hidden_executable", flags)
+
+    def test_base64_blob_decode_elf(self):
+        """Base64-encode an ELF header, verify base64_hidden_executable flag."""
+        elf_header = b"\x7fELF" + b"\x00" * 60
+        b64 = base64.b64encode(elf_header).decode("ascii")
+        text = "Binary: " + b64
+        flags = sniff_binary(text)
+        self.assertIn("base64_hidden_executable", flags)
+
+    def test_base64_blob_decode_png(self):
+        """Base64-encode a PNG header, verify base64_hidden_image flag."""
+        png_header = b"\x89PNG\r\n\x1a\n" + b"\x00" * 56
+        b64 = base64.b64encode(png_header).decode("ascii")
+        text = "Image: " + b64
+        flags = sniff_binary(text)
+        self.assertIn("base64_hidden_image", flags)
+
+    def test_data_uri_decode_rescan_pdf(self):
+        """data:application/pdf;base64,<b64> should decode and detect hidden PDF."""
+        pdf_header = b"%PDF-1.7 fake document"
+        b64 = base64.b64encode(pdf_header).decode("ascii")
+        uri = "data:application/pdf;base64," + b64
+        text = "Check this: " + uri
+        flags = sniff_binary(text)
+        self.assertIn("data_uri_detected", flags)
+        self.assertIn("base64_hidden_document", flags)
+
+    def test_data_uri_decode_rescan_exe(self):
+        """data URI with a hidden executable should flag base64_hidden_executable."""
+        exe_header = b"MZ" + b"\x00" * 62
+        b64 = base64.b64encode(exe_header).decode("ascii")
+        uri = "data:application/octet-stream;base64," + b64
+        flags = sniff_binary(uri)
+        self.assertIn("data_uri_detected", flags)
+        self.assertIn("base64_hidden_executable", flags)
+
+    def test_invalid_base64_no_crash(self):
+        """Malformed base64 should not raise an exception."""
+        # _decode_and_rescan should return [] on invalid input
+        result = _decode_and_rescan("!!!NOT_VALID_BASE64!!!")
+        self.assertEqual(result, [])
+
+    def test_invalid_base64_in_text_no_crash(self):
+        """Malformed base64-like string in text should not crash sniff_binary."""
+        # This looks like base64 to the regex but is invalid when decoded
+        bad_blob = "A" * 64 + "!!!"
+        flags = sniff_binary("Data: " + bad_blob)
+        # Should at least get blob detection, but no crash
+        self.assertIsInstance(flags, list)
+
+    def test_base64_too_large_skipped(self):
+        """>1.5MB base64 string should be skipped with a size flag."""
+        large_b64 = "A" * (_BASE64_MAX_ENCODED_LEN + 100)
+        result = _decode_and_rescan(large_b64)
+        self.assertIn("base64_payload_too_large", result)
+        # Should NOT contain any hidden_* flags
+        hidden = [f for f in result if f.startswith("base64_hidden_")]
+        self.assertEqual(hidden, [])
+
+    def test_decode_rescan_plain_text_no_flags(self):
+        """Base64-encoded plain text should not produce hidden_* flags."""
+        plain = b"Hello, this is just normal text content."
+        b64 = base64.b64encode(plain).decode("ascii")
+        result = _decode_and_rescan(b64)
+        self.assertEqual(result, [])
+
+    def test_decode_rescan_gzip_archive(self):
+        """Base64-encoded gzip header should produce base64_hidden_archive."""
+        gzip_header = b"\x1f\x8b\x08" + b"\x00" * 61
+        b64 = base64.b64encode(gzip_header).decode("ascii")
+        result = _decode_and_rescan(b64)
+        self.assertIn("base64_hidden_archive", result)
+
+    def test_decode_rescan_mp3_audio(self):
+        """Base64-encoded MP3 header should produce base64_hidden_audio."""
+        mp3_header = b"ID3\x04\x00" + b"\x00" * 59
+        b64 = base64.b64encode(mp3_header).decode("ascii")
+        result = _decode_and_rescan(b64)
+        self.assertIn("base64_hidden_audio", result)
 
 
 # ===================================================================

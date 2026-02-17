@@ -4,13 +4,15 @@ Provides tiered file-type detection for injection-relevant formats.
 No external dependencies — all detection is manual byte comparison.
 
 Tiers:
-    CRITICAL — Executables: always reject (MZ, ELF, Mach-O, Java class, WASM, shebang)
-    HIGH     — Documents (PDF, RTF, OOXML, OLE2), Archives (ZIP, GZIP, 7z, RAR, BZIP2),
+    CRITICAL — Executables: always reject (MZ, ELF, Mach-O, Mach-O Universal, Java class, WASM, shebang)
+    HIGH     — Documents (PDF, RTF, OOXML, OLE2), Archives (ZIP, GZIP, 7z, RAR, BZIP2, XZ, LZMA),
                Images (PNG, JPEG, GIF, BMP, TIFF, WebP, PSD, ICO)
+    Polyglot — Secondary signature scan after primary match (PDF+ZIP, JPEG+ZIP, etc.)
     MEDIUM   — Audio (WAV, MP3, FLAC, OGG, AAC, MIDI, AIFF),
                Video (AVI, WebM/MKV, MP4, FLV, WMV)
 """
 
+import base64
 import re
 from dataclasses import dataclass, field
 
@@ -58,9 +60,9 @@ _SIGNATURES = [
     (b"\xfe\xed\xfa\xcf",  0, "exe_macho64",  "application/x-mach-binary", "CRITICAL", "embedded_executable", "embedded_macho"),
     (b"\xce\xfa\xed\xfe",  0, "exe_macho32r", "application/x-mach-binary", "CRITICAL", "embedded_executable", "embedded_macho"),
     (b"\xcf\xfa\xed\xfe",  0, "exe_macho64r", "application/x-mach-binary", "CRITICAL", "embedded_executable", "embedded_macho"),
-    (b"\xca\xfe\xba\xbe",  0, "java_class",   "application/java",          "CRITICAL", "embedded_executable", "embedded_java_class"),
+    # NOTE: 0xCAFEBABE (java_class / macho_universal) handled above linear scan
     (b"\x00asm",           0, "wasm",         "application/wasm",          "CRITICAL", "embedded_executable", "embedded_wasm"),
-    (b"#!",                0, "shebang",      "text/x-shellscript",        "CRITICAL", "embedded_executable", "embedded_shebang"),
+    (b"#!/",               0, "shebang",      "text/x-shellscript",        "CRITICAL", "embedded_executable", "embedded_shebang"),
 
     # ---- HIGH: Documents ----
     (b"%PDF",              0, "pdf",  "application/pdf", "HIGH", "embedded_document", "embedded_pdf"),
@@ -84,6 +86,8 @@ _SIGNATURES = [
     (b"7z\xbc\xaf'\x1c",  0, "7z",    "application/x-7z-compressed",  "HIGH", "embedded_archive", "embedded_7z"),
     (b"Rar!\x1a\x07",     0, "rar",   "application/x-rar-compressed", "HIGH", "embedded_archive", "embedded_rar"),
     (b"BZh",               0, "bzip2", "application/x-bzip2",          "HIGH", "embedded_archive", "embedded_bzip2"),
+    (b"\xfd7zXZ\x00",      0, "xz",    "application/x-xz",             "HIGH", "embedded_archive", "embedded_xz"),
+    (b"\x5d\x00\x00",      0, "lzma",  "application/x-lzma",           "HIGH", "embedded_archive", "embedded_lzma"),
 
     # ---- MEDIUM: Audio ----
     (b"ID3",               0, "mp3_id3",  "audio/mpeg",  "MEDIUM", "embedded_audio", "embedded_mp3"),
@@ -151,6 +155,63 @@ _DATA_URI_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
+# Base64 decode + re-scan safety limits
+# ---------------------------------------------------------------------------
+
+# Maximum encoded base64 string length to attempt decoding (bytes).
+# Base64 expands ~33%, so 1.5 MB encoded ≈ ~1 MB decoded.
+_BASE64_MAX_ENCODED_LEN = 1_500_000
+
+# Maximum decoded payload size we will inspect (1 MB).
+_BASE64_MAX_DECODED_LEN = 1_048_576
+
+# Category ➔ flag-suffix mapping used by _decode_and_rescan().
+_CATEGORY_TO_HIDDEN_SUFFIX = {
+    "embedded_executable": "executable",
+    "embedded_document": "document",
+    "embedded_image": "image",
+    "embedded_archive": "archive",
+    "embedded_audio": "audio",
+    "embedded_video": "video",
+}
+
+
+def _decode_and_rescan(b64_string):
+    """Decode a base64 string and run detect_content_type on the result.
+
+    Returns a list of ``base64_hidden_*`` flags.  Returns an empty list
+    when decoding fails, the payload exceeds safety limits, or no binary
+    signature is found in the decoded bytes.
+    """
+    if len(b64_string) > _BASE64_MAX_ENCODED_LEN:
+        return ["base64_payload_too_large"]
+
+    try:
+        decoded = base64.b64decode(b64_string, validate=True)
+    except Exception:
+        return []
+
+    if len(decoded) > _BASE64_MAX_DECODED_LEN:
+        return ["base64_payload_too_large"]
+
+    result = detect_content_type(decoded)
+    if not result.detected_type:
+        return []
+
+    flags = []
+    # Map category to a human-friendly hidden-content flag
+    suffix = _CATEGORY_TO_HIDDEN_SUFFIX.get(result.category, result.detected_type)
+    flags.append("base64_hidden_{}".format(suffix))
+
+    # CRITICAL tier always gets the executable flag
+    if result.tier == "CRITICAL":
+        if "base64_hidden_executable" not in flags:
+            flags.append("base64_hidden_executable")
+
+    return flags
+
+
+# ---------------------------------------------------------------------------
 # Core detection function (bytes input)
 # ---------------------------------------------------------------------------
 
@@ -170,68 +231,173 @@ def detect_content_type(data):
     if len(data) < 2:
         return ContentTypeResult()
 
+    result = None
+
     # --- RIFF container (needs 12 bytes) ---
     if len(data) >= 12 and data[:4] == b"RIFF":
         sub = data[8:12]
         if sub in _RIFF_SUBTYPES:
             dtype, mime, tier, cat, subflag = _RIFF_SUBTYPES[sub]
-            return ContentTypeResult(
+            result = ContentTypeResult(
                 detected_type=dtype, mime_type=mime, tier=tier,
                 category=cat, flags=[subflag, cat],
             )
-        # Unknown RIFF sub-type -- still flag it
-        return ContentTypeResult(
-            detected_type="riff_unknown",
-            mime_type="application/octet-stream",
-            tier="MEDIUM", category="embedded_archive",
-            flags=["embedded_riff_unknown", "embedded_archive"],
-        )
+        else:
+            # Unknown RIFF sub-type -- still flag it
+            result = ContentTypeResult(
+                detected_type="riff_unknown",
+                mime_type="application/octet-stream",
+                tier="MEDIUM", category="embedded_archive",
+                flags=["embedded_riff_unknown", "embedded_archive"],
+            )
 
     # --- FORM container (AIFF) ---
-    if len(data) >= 12 and data[:4] == b"FORM":
+    if result is None and len(data) >= 12 and data[:4] == b"FORM":
         sub = data[8:12]
         if sub in _FORM_SUBTYPES:
             dtype, mime, tier, cat, subflag = _FORM_SUBTYPES[sub]
-            return ContentTypeResult(
+            result = ContentTypeResult(
                 detected_type=dtype, mime_type=mime, tier=tier,
                 category=cat, flags=[subflag, cat],
             )
 
     # --- PK / ZIP-based (OOXML, ODF, JAR, plain ZIP) ---
-    if len(data) >= 4 and data[:4] == _PK_HEADER:
-        return _check_pk_archive(data)
+    if result is None and len(data) >= 4 and data[:4] == _PK_HEADER:
+        result = _check_pk_archive(data)
 
     # --- MP4 / MOV: "ftyp" at offset 4 ---
-    if len(data) >= 8 and data[4:8] == _FTYP_MARKER:
-        return ContentTypeResult(
+    if result is None and len(data) >= 8 and data[4:8] == _FTYP_MARKER:
+        result = ContentTypeResult(
             detected_type="mp4", mime_type="video/mp4",
             tier="MEDIUM", category="embedded_video",
             flags=["embedded_mp4", "embedded_video"],
         )
 
     # --- TAR: "ustar" at offset 257 ---
-    if len(data) >= 262 and data[257:262] == b"ustar":
-        return ContentTypeResult(
+    if result is None and len(data) >= 262 and data[257:262] == b"ustar":
+        result = ContentTypeResult(
             detected_type="tar", mime_type="application/x-tar",
             tier="HIGH", category="embedded_archive",
             flags=["embedded_tar", "embedded_archive"],
         )
 
-    # --- Linear scan of signature table ---
-    for sig, offset, dtype, mime, tier, cat, subflag in _SIGNATURES:
-        end = offset + len(sig)
-        if len(data) >= end and data[offset:end] == sig:
-            reject = (tier == "CRITICAL")
-            reason = ""
-            if reject:
-                reason = "Executable binary detected ({})".format(dtype)
-            return ContentTypeResult(
-                detected_type=dtype, mime_type=mime, tier=tier,
-                category=cat, flags=[subflag, cat],
-                reject=reject, reject_reason=reason,
+    # --- Java class vs Mach-O Universal (fat binary) disambiguation ---
+    # Both share magic 0xCAFEBABE.  Bytes 6-7 are the Java major version
+    # (45-66 for Java 1.1 through 22).  Mach-O fat stores the arch count
+    # in bytes 4-7 (big-endian uint32); typical values (2-5) fall well
+    # outside the Java major-version range.
+    _CAFEBABE = b"\xca\xfe\xba\xbe"
+    if result is None and len(data) >= 4 and data[:4] == _CAFEBABE:
+        is_java = False
+        if len(data) >= 8:
+            major = int.from_bytes(data[6:8], "big")
+            is_java = 45 <= major <= 66
+        else:
+            # Not enough bytes to disambiguate — default to java_class
+            is_java = True
+
+        if is_java:
+            result = ContentTypeResult(
+                detected_type="java_class",
+                mime_type="application/java",
+                tier="CRITICAL", category="embedded_executable",
+                flags=["embedded_java_class", "embedded_executable"],
+                reject=True,
+                reject_reason="Executable binary detected (java_class)",
+            )
+        else:
+            result = ContentTypeResult(
+                detected_type="macho_universal",
+                mime_type="application/x-mach-binary",
+                tier="CRITICAL", category="embedded_executable",
+                flags=["embedded_macho", "embedded_executable"],
+                reject=True,
+                reject_reason="Executable binary detected (macho_universal)",
             )
 
+    # --- Linear scan of signature table ---
+    if result is None:
+        for sig, offset, dtype, mime, tier, cat, subflag in _SIGNATURES:
+            end = offset + len(sig)
+            if len(data) >= end and data[offset:end] == sig:
+                # -- BMP secondary validation (BUG-CT-3) --
+                # Real BMP has a 14-byte header; bytes 6-9 are reserved and
+                # must be \x00\x00\x00\x00.  Without this check, any text
+                # starting with "BM" (e.g. "BMP specs") is a false positive.
+                if dtype == "bmp":
+                    if len(data) >= 10 and data[6:10] != b"\x00\x00\x00\x00":
+                        continue
+                # -- ICO secondary validation (BUG-CT-3) --
+                # Real ICO has bytes 4-5 = image count (LE uint16, 1-255).
+                # A count of 0 or >255 is not a valid ICO file.
+                if dtype == "ico":
+                    if len(data) >= 6:
+                        img_count = int.from_bytes(data[4:6], "little")
+                        if img_count == 0 or img_count > 255:
+                            continue
+
+                reject = (tier == "CRITICAL")
+                reason = ""
+                if reject:
+                    reason = "Executable binary detected ({})".format(dtype)
+                result = ContentTypeResult(
+                    detected_type=dtype, mime_type=mime, tier=tier,
+                    category=cat, flags=[subflag, cat],
+                    reject=reject, reject_reason=reason,
+                )
+                break
+
+    # --- Polyglot detection: scan for secondary signatures ---
+    if result is not None:
+        return _check_polyglot(data, result)
+
     return ContentTypeResult()
+
+
+# ---------------------------------------------------------------------------
+# Polyglot detection — secondary signature scan
+# ---------------------------------------------------------------------------
+
+# Tier priority for upgrading (higher index = higher priority)
+_TIER_PRIORITY = {"": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+
+
+def _check_polyglot(data, result):
+    """Scan for secondary magic bytes that indicate a polyglot file.
+
+    A polyglot file is one that is valid in two or more formats
+    simultaneously (e.g. a PDF that is also a valid ZIP archive).
+    Attackers use polyglots to bypass content-type filters.
+
+    Modifies *result* in place: adds ``"polyglot_detected"`` to flags
+    and upgrades tier to at least HIGH when a secondary signature is found.
+    """
+    if not result.detected_type:
+        return result
+
+    primary = result.detected_type
+
+    # --- Check for embedded PK/ZIP signature after byte 4 ---
+    # (Skip if primary is already a ZIP-based format)
+    _ZIP_TYPES = {"zip", "docx", "xlsx", "pptx", "ooxml", "odf", "jar"}
+    if primary not in _ZIP_TYPES and len(data) > 8:
+        # Search for PK\x03\x04 starting after byte 4
+        if _PK_HEADER in data[4:]:
+            result.flags.append("polyglot_detected")
+
+    # --- Check for embedded %PDF if primary is NOT already PDF ---
+    if primary != "pdf" and len(data) > 4:
+        if b"%PDF" in data:
+            result.flags.append("polyglot_detected")
+
+    # Upgrade tier if polyglot was detected
+    if "polyglot_detected" in result.flags:
+        primary_priority = _TIER_PRIORITY.get(result.tier, 0)
+        high_priority = _TIER_PRIORITY["HIGH"]
+        if primary_priority < high_priority:
+            result.tier = "HIGH"
+
+    return result
 
 
 def _check_pk_archive(data):
@@ -276,8 +442,12 @@ def sniff_binary(text):
         flags.extend(result.flags)
 
     # Check for base64 blobs in the full text
-    if _BASE64_BLOB_RE.search(text):
+    b64_match = _BASE64_BLOB_RE.search(text)
+    if b64_match:
         flags.append("base64_blob_detected")
+        # Decode and re-scan to discover hidden content types
+        hidden_flags = _decode_and_rescan(b64_match.group(0))
+        flags.extend(hidden_flags)
 
     # Check for data URIs
     match = _DATA_URI_RE.search(text)
@@ -288,5 +458,10 @@ def sniff_binary(text):
             flags.append("data_uri_type_{}".format(
                 media_type.replace("/", "_").lower()
             ))
+        # Decode the base64 payload from the data URI and re-scan
+        b64_payload = match.group(2)
+        if b64_payload:
+            hidden_flags = _decode_and_rescan(b64_payload)
+            flags.extend(hidden_flags)
 
     return flags

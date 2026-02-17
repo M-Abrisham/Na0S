@@ -1,7 +1,12 @@
-"""OCR text extraction from images for Layer 0 pipeline.
+"""OCR text extraction and EXIF/XMP metadata extraction from images.
 
 Extracts text from image data (PNG, JPEG, GIF, BMP, TIFF, WebP) using
 OCR engines.  Engine priority: EasyOCR > pytesseract > none.
+
+Also extracts text from EXIF tags (ImageDescription, UserComment,
+XPComment, XPTitle, XPSubject) and XMP metadata (dc:description,
+dc:title).  Image metadata can carry injection payloads invisible
+to OCR -- extracting it ensures the full-text scan covers hidden text.
 
 ALL imports are optional.  When no OCR library is installed the module
 still loads and ``extract_text_from_image`` returns an empty
@@ -14,6 +19,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -91,6 +97,56 @@ class OCRResult:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ImageMetadataResult:
+    """Result of EXIF/XMP metadata text extraction from an image.
+
+    Attributes:
+        metadata_text:    Combined text from all metadata fields found.
+        metadata_fields:  Names of the metadata fields that contained text.
+        has_metadata_text: True if any metadata text was extracted.
+        warnings:         Non-fatal issues encountered during extraction.
+    """
+
+    metadata_text: str = ""
+    metadata_fields: list[str] = field(default_factory=list)
+    has_metadata_text: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# EXIF tag IDs of interest (text-carrying tags)
+# ---------------------------------------------------------------------------
+
+#: EXIF tag ID -> human-readable name
+_EXIF_TEXT_TAGS: dict[int, str] = {
+    270: "ImageDescription",
+    37510: "UserComment",
+    40091: "XPTitle",
+    40092: "XPComment",
+    40093: "XPSubject",
+}
+
+#: Regex to find XMP metadata blocks in raw bytes.
+_XMP_BLOCK_RE = re.compile(
+    rb"<x:xmpmeta[^>]*>(.+?)</x:xmpmeta>", re.DOTALL
+)
+
+#: Regex to extract dc:description text from XMP XML.
+_XMP_DC_DESC_RE = re.compile(
+    rb"<dc:description[^>]*>.*?<rdf:Alt[^>]*>.*?"
+    rb"<rdf:li[^>]*>([^<]+)</rdf:li>",
+    re.DOTALL,
+)
+
+#: Regex to extract dc:title text from XMP XML.
+_XMP_DC_TITLE_RE = re.compile(
+    rb"<dc:title[^>]*>.*?<rdf:Alt[^>]*>.*?"
+    rb"<rdf:li[^>]*>([^<]+)</rdf:li>",
+    re.DOTALL,
+)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -109,6 +165,74 @@ def detect_image_format(data: bytes) -> str | None:
         elif data[: len(sig)] == sig:
             return fmt
     return None
+
+
+def extract_image_metadata(image_data: bytes) -> ImageMetadataResult:
+    """Extract text from EXIF tags and XMP metadata in image bytes.
+
+    Image metadata fields such as ``ImageDescription``, ``UserComment``,
+    ``XPComment``, ``XPTitle``, ``XPSubject`` (EXIF) and ``dc:description``,
+    ``dc:title`` (XMP) can carry injection payloads invisible to OCR.
+
+    This function extracts any text found in those fields so the
+    downstream pipeline can scan it for malicious content.
+
+    Parameters
+    ----------
+    image_data:
+        Raw bytes of the image file.
+
+    Returns
+    -------
+    ImageMetadataResult
+        Always returns a result -- never raises.  If PIL is not
+        installed or the image has no text metadata, the result is
+        empty.
+    """
+    if not image_data:
+        return ImageMetadataResult()
+
+    texts: list[str] = []
+    fields_found: list[str] = []
+    warnings: list[str] = []
+
+    # --- EXIF extraction via PIL -----------------------------------------
+    if _HAS_PIL:
+        try:
+            img = Image.open(io.BytesIO(image_data))
+            exif_data = img.getexif()
+            if exif_data:
+                for tag_id, tag_name in _EXIF_TEXT_TAGS.items():
+                    value = exif_data.get(tag_id)
+                    if value is not None:
+                        text = _decode_exif_value(value)
+                        if text:
+                            texts.append(text)
+                            fields_found.append("exif:{}".format(tag_name))
+        except Exception as exc:
+            warnings.append("EXIF extraction error: {}".format(exc))
+    else:
+        warnings.append(
+            "Pillow (PIL) not installed -- EXIF extraction skipped"
+        )
+
+    # --- XMP extraction from raw bytes -----------------------------------
+    # XMP is embedded as XML in the image file; we can search for it
+    # directly in the raw bytes without needing PIL.
+    try:
+        xmp_texts, xmp_fields = _extract_xmp_text(image_data)
+        texts.extend(xmp_texts)
+        fields_found.extend(xmp_fields)
+    except Exception as exc:
+        warnings.append("XMP extraction error: {}".format(exc))
+
+    combined = "\n".join(texts).strip()
+    return ImageMetadataResult(
+        metadata_text=combined,
+        metadata_fields=fields_found,
+        has_metadata_text=bool(combined),
+        warnings=warnings,
+    )
 
 
 def extract_text_from_image(
@@ -312,3 +436,116 @@ def _tesseract_confidence(img, lang: str) -> float:
     except Exception:
         pass
     return 0.0
+
+
+def _decode_exif_value(value) -> str:
+    """Decode an EXIF tag value to a string.
+
+    EXIF values can be ``str``, ``bytes``, ``int``, or other types.
+    Windows XP tags (XPTitle, XPComment, XPSubject) are stored as
+    UTF-16LE encoded bytes.  ``UserComment`` may have an 8-byte
+    charset prefix (ASCII / JIS / Unicode / Undefined).
+    """
+    if isinstance(value, str):
+        return value.strip()
+
+    if isinstance(value, bytes):
+        # UserComment: first 8 bytes are charset identifier
+        if len(value) > 8:
+            charset_id = value[:8]
+            if charset_id == b"UNICODE\x00":
+                try:
+                    return value[8:].decode("utf-16le", errors="replace").strip("\x00 ")
+                except Exception:
+                    pass
+            elif charset_id == b"ASCII\x00\x00\x00":
+                try:
+                    return value[8:].decode("ascii", errors="replace").strip("\x00 ")
+                except Exception:
+                    pass
+
+        # Detect UTF-16LE: if every other byte is \x00, try UTF-16LE first.
+        # This handles Windows XP tags which are UTF-16LE encoded.
+        if len(value) >= 2 and b"\x00" in value:
+            # Heuristic: if >30% of bytes are \x00, likely UTF-16LE
+            null_ratio = value.count(b"\x00"[0]) / len(value)
+            if null_ratio > 0.3:
+                try:
+                    decoded = value.decode("utf-16le", errors="replace").strip("\x00 ")
+                    if decoded:
+                        return decoded
+                except Exception:
+                    pass
+
+        # Try UTF-8 (common for ImageDescription and similar)
+        try:
+            decoded_utf8 = value.decode("utf-8", errors="strict").strip("\x00 ")
+            if decoded_utf8:
+                return decoded_utf8
+        except (UnicodeDecodeError, Exception):
+            pass
+
+        # Windows XP tags are UTF-16LE, often null-terminated (fallback)
+        try:
+            decoded = value.decode("utf-16le", errors="replace").strip("\x00 ")
+            if decoded:
+                return decoded
+        except Exception:
+            pass
+
+        # Last resort: UTF-8 with replacement chars
+        try:
+            return value.decode("utf-8", errors="replace").strip("\x00 ")
+        except Exception:
+            pass
+
+    if isinstance(value, (int, float)):
+        return ""  # numeric tags are not text
+
+    return str(value).strip() if value else ""
+
+
+def _extract_xmp_text(raw_bytes: bytes) -> tuple[list[str], list[str]]:
+    """Extract text from XMP metadata embedded in raw image bytes.
+
+    XMP is an XML block that can appear in JPEG, TIFF, PNG, and other
+    formats.  We search for ``<x:xmpmeta>`` blocks and extract
+    ``dc:description`` and ``dc:title`` values.
+
+    Returns
+    -------
+    tuple of (list[str], list[str])
+        ``(extracted_texts, field_names)``
+    """
+    texts: list[str] = []
+    fields: list[str] = []
+
+    xmp_match = _XMP_BLOCK_RE.search(raw_bytes)
+    if not xmp_match:
+        return texts, fields
+
+    xmp_block = xmp_match.group(0)
+
+    # Extract dc:description
+    desc_match = _XMP_DC_DESC_RE.search(xmp_block)
+    if desc_match:
+        try:
+            desc = desc_match.group(1).decode("utf-8", errors="replace").strip()
+            if desc:
+                texts.append(desc)
+                fields.append("xmp:dc:description")
+        except Exception:
+            pass
+
+    # Extract dc:title
+    title_match = _XMP_DC_TITLE_RE.search(xmp_block)
+    if title_match:
+        try:
+            title = title_match.group(1).decode("utf-8", errors="replace").strip()
+            if title:
+                texts.append(title)
+                fields.append("xmp:dc:title")
+        except Exception:
+            pass
+
+    return texts, fields
