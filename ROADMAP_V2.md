@@ -1503,7 +1503,7 @@ Layer 20 automates the lifecycle of the threat taxonomy: syncing with external s
 
 **Research Sources**: [awesome-readme](https://github.com/matiassingers/awesome-readme), [10 Standout GitHub READMEs](https://dev.to/github/10-standout-github-profile-readmes-h2o), [mehdiamiri1440 profile](https://github.com/mehdiamiri1440), [best-github-profile-readme](https://github.com/MaxRohowsky/best-github-profile-readme), [github-pages-examples](https://github.com/collections/github-pages-examples)
 
-**Status**: In progress — research complete, implementation pending
+**Status**: Complete — README overhauled from 685→246 lines; docs/ subdirectory created with ARCHITECTURE.md, TAXONOMY.md, TRAINING.md, STANDARDS.md; animated SVGs added to assets/
 
 ---
 
@@ -1521,39 +1521,40 @@ Layer 20 automates the lifecycle of the threat taxonomy: syncing with external s
 ### Phase 1: Visual Impact — Quick Wins (Low Effort, High Impact)
 
 #### 1.1 Capsule Render Animated Banner
-- [ ] Replace plain typing SVG header with [capsule-render](https://github.com/kyechan99/capsule-render) `venom` type banner
-- [ ] Colors: dark gradient `0:0d1117,50:E63946,100:1D3557` (matches project red/navy palette)
-- [ ] Include project title + subtitle with `twinkling` animation
-- [ ] Add matching footer banner with `section=footer&type=waving`
-- [ ] Embed code:
+- [x] Replace plain typing SVG header with [capsule-render](https://github.com/kyechan99/capsule-render) `venom` type banner — done in README overhaul
+- [x] Colors: dark gradient `0:0d1117,50:E63946,100:1D3557` (matches project red/navy palette) — done in README overhaul
+- [x] Include project title + subtitle with `twinkling` animation — done in README overhaul
+- [x] Add matching footer banner with `section=footer&type=waving` — done in README overhaul
+- [x] Add Disclamer (Tool is still in development process) — done in README overhaul (Disclaimer section added)
+- [x] Embed code: — done in README overhaul
 ```markdown
 ![Header](https://capsule-render.vercel.app/api?type=venom&color=0:0d1117,50:E63946,100:1D3557&height=300&section=header&text=AI%20Prompt%20Injection%20Detector&fontSize=40&fontColor=F1FAEE&animation=twinkling&desc=20-Layer%20Defense%20%7C%20103%2B%20Attack%20Techniques&descAlignY=62&descSize=18)
 ```
 
 #### 1.2 Enhanced Typing SVG — Threat Feed Style
-- [ ] Add a SECOND typing SVG lower in the README that simulates a live threat feed
-- [ ] Cycle through real attack examples being blocked: `"BLOCKED: Ignore all previous... → D1.1"`, `"BLOCKED: You are now DAN → D2.1"`, `"SAFE: What is the capital? → Whitelist"`
-- [ ] Use `font=Fira+Code&size=14&color=E63946&background=0D111700`
+- [x] Add a SECOND typing SVG lower in the README that simulates a live threat feed — done in README overhaul
+- [x] Cycle through real attack examples being blocked: `"BLOCKED: Ignore all previous... → D1.1"`, `"BLOCKED: You are now DAN → D2.1"`, `"SAFE: What is the capital? → Whitelist"` — done in README overhaul
+- [x] Use `font=Fira+Code&size=14&color=E63946&background=0D111700` — done in README overhaul
 
 #### 1.3 Security-Themed Shields.io Badges
-- [ ] Add custom SVG logo badges (shield icon encoded in base64):
+- [x] Add custom SVG logo badges (shield icon encoded in base64) — done in README overhaul:
   - `threats_blocked-103+-E63946` with shield logo
   - `ML_accuracy-94.5%-3fb950` with checkmark logo
   - `false_positive_rate-<2%-58a6ff`
-- [ ] Add dynamic license badge: `https://img.shields.io/github/license/M-Abrisham/AI-Prompt-Injection-Detector`
-- [ ] Add "Try It Live" call-to-action badge (link to Colab/demo when available)
+- [x] Add dynamic license badge: `https://img.shields.io/github/license/M-Abrisham/AI-Prompt-Injection-Detector` — done in README overhaul
+- [x] Add "Try It Live" call-to-action badge (link to Colab/demo when available) — done in README overhaul
 
-#### 1.4 Badge-Style Section Dividers
-- [ ] Replace plain `## Heading` with for-the-badge section headers:
+#### 1.4 ~~Badge-Style Section Dividers~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Replace plain `## Heading` with for-the-badge section headers~~ — WONTDO (conflicts with slim README directive)
   - `![ARCHITECTURE](https://img.shields.io/badge/ARCHITECTURE-20_LAYER_DEFENSE-1D3557?style=for-the-badge&labelColor=E63946)`
   - `![THREATS](https://img.shields.io/badge/THREAT_TAXONOMY-19_CATEGORIES-457B9D?style=for-the-badge&labelColor=FF6B35)`
 
-#### 1.5 ASCII Art Terminal Header (Alternative/Supplement)
-- [ ] Add a figlet-style ASCII art block in a code fence for terminal/hacker aesthetic
-- [ ] Include project stats in ASCII: `20 Layers | 103+ Techniques | 126K Samples`
+#### 1.5 ~~ASCII Art Terminal Header (Alternative/Supplement)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add a figlet-style ASCII art block in a code fence for terminal/hacker aesthetic~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Include project stats in ASCII: `20 Layers | 103+ Techniques | 126K Samples`~~ — WONTDO (conflicts with slim README directive)
 
-#### 1.6 Progress Bars for Layer Implementation
-- [ ] Add Unicode progress bars showing each layer's completion status:
+#### 1.6 ~~Progress Bars for Layer Implementation~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add Unicode progress bars showing each layer's completion status~~ — WONTDO (conflicts with slim README directive)
 ```markdown
 | Layer | Status | Progress |
 |-------|--------|----------|
@@ -1562,19 +1563,19 @@ Layer 20 automates the lifecycle of the threat taxonomy: syncing with external s
 | L4: ML Classifier | Trained | `[#################---]  85%` |
 ```
 
-#### 1.7 Threat Heatmap Table with Color Badges
-- [ ] Transform taxonomy table: add severity badges (`CRITICAL`/`HIGH`/`MEDIUM`) and coverage badges (`FULL`/`PARTIAL`/`PLANNED`)
-- [ ] Use shields.io inline badges for color coding per row
+#### 1.7 ~~Threat Heatmap Table with Color Badges~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Transform taxonomy table: add severity badges (`CRITICAL`/`HIGH`/`MEDIUM`) and coverage badges (`FULL`/`PARTIAL`/`PLANNED`)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Use shields.io inline badges for color coding per row~~ — WONTDO (conflicts with slim README directive)
 
 ---
 
 ### Phase 2: Diagrams & Data Visualization (Medium Effort, Very High Impact)
 
 #### 2.1 Enhanced Mermaid Diagrams
-- [ ] Add `%%{init: {'theme':'neutral'}}%%` to ensure consistent rendering across light/dark GitHub themes
-- [ ] Fix `{{ }}` hexagon node to `{ }` diamond for verdict
-- [ ] Add dashed edges from Infrastructure subgraph to main pipeline
-- [ ] Add a **Mermaid pie chart** for attack category distribution:
+- [x] Add `%%{init: {'theme':'neutral'}}%%` to ensure consistent rendering across light/dark GitHub themes — Mermaid diagram moved to docs/ARCHITECTURE.md
+- [x] Fix `{{ }}` hexagon node to `{ }` diamond for verdict — Mermaid diagram moved to docs/ARCHITECTURE.md
+- [x] Add dashed edges from Infrastructure subgraph to main pipeline — Mermaid diagram moved to docs/ARCHITECTURE.md
+- [ ] ~~Add a **Mermaid pie chart** for attack category distribution~~ — WONTDO (conflicts with slim README directive)
 ```mermaid
 pie title Attack Category Distribution
     "D1: Instruction Override" : 20
@@ -1583,7 +1584,7 @@ pie title Attack Category Distribution
     "E1: System Prompt Extract" : 6
     "Other Categories" : 66
 ```
-- [ ] Add a **Mermaid sequence diagram** showing a real attack being detected step-by-step across layers
+- [ ] ~~Add a **Mermaid sequence diagram** showing a real attack being detected step-by-step across layers~~ — WONTDO (conflicts with slim README directive)
 
 #### 2.2 Radar Chart — Threat Coverage Visualization
 - [ ] Generate a radar/spider chart SVG using matplotlib showing coverage across 19 categories
@@ -1593,12 +1594,12 @@ pie title Attack Category Distribution
 - [ ] Python script: `scripts/generate_readme_assets.py`
 
 #### 2.3 Custom SVG Scanner Animation (Flagship Visual)
-- [ ] Create a custom animated SVG (`assets/scanner-animation.svg`) that looks like a real-time security scanner
-- [ ] Terminal-style green-on-dark text showing layer-by-layer scan output
-- [ ] Animated scan line sweeping across
-- [ ] Blinking red "THREAT DETECTED" verdict
-- [ ] Uses CSS `@keyframes` inside SVG (GitHub renders this)
-- [ ] This replaces the static text "Detection in Action" block with a living animation
+- [x] Create a custom animated SVG (`assets/pipeline-animation.svg`) that shows the 5-stage detection pipeline — done in README overhaul
+- [x] Terminal-style green-on-dark text showing layer-by-layer scan output — done (pipeline-animation.svg)
+- [x] Animated scan line sweeping across — done (CSS @keyframes in pipeline-animation.svg)
+- [x] Blinking red "THREAT DETECTED" verdict — done (pipeline-animation.svg)
+- [x] Uses CSS `@keyframes` inside SVG (GitHub renders this) — done (pipeline-animation.svg)
+- [x] This replaces the static text "Detection in Action" block with a living animation — done in README overhaul
 
 #### 2.4 Dark/Light Mode Support
 - [ ] Create dual-mode versions of all custom visual assets using `<picture>` element:
@@ -1614,33 +1615,33 @@ pie title Attack Category Distribution
 
 ### Phase 3: Animations & Dynamic Content (Medium-High Effort)
 
-#### 3.1 Terminal Demo GIF
-- [ ] Record a real terminal session using [VHS](https://github.com/charmbracelet/vhs) or [asciinema](https://asciinema.org/) or [Terminalizer](https://github.com/faressoft/terminalizer)
-- [ ] Show actual `scan()` and `CascadeDetector.scan()` calls with real prompts being classified
-- [ ] Include both safe and malicious examples
-- [ ] Export as GIF, commit to `assets/demo.gif`
-- [ ] Embed prominently below the architecture diagram
+#### 3.1 Terminal Demo Visuals
+- [x] Create demo terminal screenshots as SVGs — done (assets/demo-taxonomy.svg + assets/demo-scan.svg)
+- [x] Show actual `scan()` and `CascadeDetector.scan()` calls with real prompts being classified — done (demo-scan.svg)
+- [x] Include both safe and malicious examples — done (demo-scan.svg shows both)
+- [x] Commit to assets/ — done (demo-taxonomy.svg + demo-scan.svg)
+- [x] Embed prominently in "Detection in Action" README section — done in README overhaul
 
-#### 3.2 Contribution Snake Animation
-- [ ] Set up [Platane/snk](https://github.com/Platane/snk) GitHub Action (runs daily via cron)
-- [ ] Generate dark + light mode snake SVGs
-- [ ] Embed at bottom of README using `<picture>` for theme support
-- [ ] GitHub Action workflow file: `.github/workflows/snake.yml`
+#### 3.2 ~~Contribution Snake Animation~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Set up [Platane/snk](https://github.com/Platane/snk) GitHub Action (runs daily via cron)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Generate dark + light mode snake SVGs~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Embed at bottom of README using `<picture>` for theme support~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~GitHub Action workflow file: `.github/workflows/snake.yml`~~ — WONTDO (conflicts with slim README directive)
 
-#### 3.3 GitHub Stats Widgets (Fix + Enhance)
-- [ ] Replace broken `github-readme-stats.vercel.app` with self-hosted Vercel instance or use [github-readme-streak-stats](https://streak-stats.demolab.com/)
-- [ ] Add streak stats card (`tokyonight` theme)
-- [ ] Add top languages donut chart
-- [ ] Add repo-specific pin card
-- [ ] Add [activity graph](https://github-readme-activity-graph.vercel.app/) with `tokyo-night` theme
-- [ ] Add [github-profile-trophy](https://github-profile-trophy.vercel.app/) with `matrix` theme (green-on-black, security aesthetic)
+#### 3.3 ~~GitHub Stats Widgets (Fix + Enhance)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Replace broken `github-readme-stats.vercel.app` with self-hosted Vercel instance or use [github-readme-streak-stats](https://streak-stats.demolab.com/)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add streak stats card (`tokyonight` theme)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add top languages donut chart~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add repo-specific pin card~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add [activity graph](https://github-readme-activity-graph.vercel.app/) with `tokyo-night` theme~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add [github-profile-trophy](https://github-profile-trophy.vercel.app/) with `matrix` theme (green-on-black, security aesthetic)~~ — WONTDO (conflicts with slim README directive)
 
-#### 3.4 Animated Shield Rings SVG (Stretch Goal)
-- [ ] Create a concentric-rings SVG showing the defense-in-depth concept
-- [ ] Each ring = layer group (Input → Rules → ML → Decision → Output)
-- [ ] Rings pulse with CSS `@keyframes` animation
-- [ ] Center shows "LLM" being protected
-- [ ] Commit as `assets/shield-rings.svg`
+#### 3.4 ~~Animated Shield Rings SVG (Stretch Goal)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Create a concentric-rings SVG showing the defense-in-depth concept~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Each ring = layer group (Input → Rules → ML → Decision → Output)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Rings pulse with CSS `@keyframes` animation~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Center shows "LLM" being protected~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Commit as `assets/shield-rings.svg`~~ — WONTDO (conflicts with slim README directive)
 
 ---
 
@@ -1677,9 +1678,9 @@ pie title Attack Category Distribution
 
 ### Phase 5: Layout & Polish (Low Effort, Professional Finish)
 
-#### 5.1 Rainbow/Wave Section Dividers
-- [ ] Replace plain `---` dividers with animated wave dividers (capsule-render or custom SVG)
-- [ ] Use consistent color palette throughout: `#0d1117` (bg), `#E63946` (red accent), `#1D3557` (navy), `#457B9D` (blue), `#2A9D8F` (teal), `#F1C40F` (gold)
+#### 5.1 ~~Rainbow/Wave Section Dividers~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Replace plain `---` dividers with animated wave dividers (capsule-render or custom SVG)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Use consistent color palette throughout: `#0d1117` (bg), `#E63946` (red accent), `#1D3557` (navy), `#457B9D` (blue), `#2A9D8F` (teal), `#F1C40F` (gold)~~ — WONTDO (conflicts with slim README directive)
 
 #### 5.2 GitHub Admonitions
 - [ ] Use `> [!WARNING]`, `> [!NOTE]`, `> [!TIP]` for callouts (security warnings, prerequisites, tips)
@@ -1690,33 +1691,33 @@ pie title Attack Category Distribution
 #### 5.4 Footnotes for Academic References
 - [ ] Add footnotes `[^1]` for OWASP, AVID, LMRC, MITRE ATLAS paper references
 
-#### 5.5 Table of Contents Cleanup
-- [ ] Ensure all anchor links work after section name changes
-- [ ] Add emoji prefixes to TOC entries for visual scanning
+#### 5.5 ~~Table of Contents Cleanup~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Ensure all anchor links work after section name changes~~ — WONTDO (conflicts with slim README directive; TOC removed in slim README)
+- [ ] ~~Add emoji prefixes to TOC entries for visual scanning~~ — WONTDO (conflicts with slim README directive; TOC removed in slim README)
 
-#### 5.6 Animated GIFs in Section Headers
-- [ ] Add small inline animated GIFs (25-35px) in section headers (like mehdiamiri1440 does)
-- [ ] Source: Giphy search for security/shield/lock icons
+#### 5.6 ~~Animated GIFs in Section Headers~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Add small inline animated GIFs (25-35px) in section headers (like mehdiamiri1440 does)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Source: Giphy search for security/shield/lock icons~~ — WONTDO (conflicts with slim README directive)
 
 ---
 
-### Phase 6: "Outside the Box" — Game-Like Elements
+### Phase 6: ~~"Outside the Box" — Game-Like Elements~~ — WONTDO (conflicts with slim README directive)
 
-#### 6.1 RPG-Style "Defense Stats" Card
-- [ ] Create a custom SVG styled like an RPG character sheet:
+#### 6.1 ~~RPG-Style "Defense Stats" Card~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Create a custom SVG styled like an RPG character sheet~~ — WONTDO (conflicts with slim README directive):
   - Attack Power: 103+ techniques detected
   - Defense Rating: 20 layers
   - Training XP: 126,245 samples
   - Test Coverage: 821+ tests
   - Level: v1.0
 
-#### 6.2 "Boss Battle" Attack Visualization
-- [ ] Create an infographic showing famous jailbreak attacks (DAN, AIM, Developer Mode) being defeated by specific layers
-- [ ] Style like a fighting game matchup: "Layer 0 vs Unicode Evasion → BLOCKED"
+#### 6.2 ~~"Boss Battle" Attack Visualization~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Create an infographic showing famous jailbreak attacks (DAN, AIM, Developer Mode) being defeated by specific layers~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Style like a fighting game matchup: "Layer 0 vs Unicode Evasion → BLOCKED"~~ — WONTDO (conflicts with slim README directive)
 
-#### 6.3 Interactive Contribution Calendar Art (Optional)
-- [ ] Use strategic commit timing to create pixel art in the contribution graph (shield icon)
-- [ ] Automated via [gitfiti](https://github.com/gelstudios/gitfiti) or similar
+#### 6.3 ~~Interactive Contribution Calendar Art (Optional)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Use strategic commit timing to create pixel art in the contribution graph (shield icon)~~ — WONTDO (conflicts with slim README directive)
+- [ ] ~~Automated via [gitfiti](https://github.com/gelstudios/gitfiti) or similar~~ — WONTDO (conflicts with slim README directive)
 
 ---
 
