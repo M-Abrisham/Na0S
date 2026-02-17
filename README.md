@@ -66,9 +66,18 @@
 
 ## Overview
 
-AI language models are vulnerable to **prompt injection attacks** where adversaries manipulate the model into ignoring safety guidelines, leaking sensitive data, or performing unauthorized actions.
+**The Problem:** LLMs have no built-in way to distinguish between a developer's system prompt and a user's input. Attackers exploit this by crafting inputs that override instructions, extract secrets, hijack personas, or exfiltrate data — all through plain text. A single regex or keyword filter won't cut it. Attacks evolve, obfuscate, and layer multiple evasion techniques.
 
-This project implements a **defense-in-depth architecture** with 15 detection layers (5 more planned) — from input sanitization and Unicode normalization to ML ensemble classifiers, LLM judges, output scanning, and canary token systems — to catch attacks that single-layer detectors miss.
+**The Solution:** This project implements a **defense-in-depth architecture** — 15 independent detection layers that work together so no single bypass defeats the system:
+
+| Stage | Layers | What It Does |
+|:-----:|:------:|-------------|
+| **Input** | L0 | Sanitize, normalize Unicode, decode Base64, extract text from images/docs |
+| **Pattern** | L1–L3 | Match known attack signatures, decode obfuscation, extract 24 structural features |
+| **ML** | L4–L5 | Dual classifiers (TF-IDF + sentence embeddings) with 60/40 weighted ensemble |
+| **Decision** | L6–L8 | Cascade voting, LLM judge for ambiguous cases, positive validation |
+| **Output** | L9–L10 | Scan LLM responses for leaked secrets, role-breaks, and canary token extraction |
+| **Infra** | L11–L14 | Supply chain integrity, adversarial probes, dataset pipeline, CI/CD |
 
 > [!WARNING]
 > **Prompt injection is the #1 security risk for LLM applications** ([OWASP LLM Top 10, 2025](https://genai.owasp.org/)). This project provides defense-in-depth protection.
