@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- Animated Venom Banner -->
-<img src="https://capsule-render.vercel.app/api?type=venom&color=0:0d1117,50:E63946,100:1D3557&height=300&section=header&text=AI%20Prompt%20Injection%20Detector&fontSize=40&fontColor=F1FAEE&animation=twinkling&desc=15-Layer%20Defense%20%7C%20103%2B%20Attack%20Techniques%20%7C%20126K%20Samples&descAlignY=62&descSize=18" width="100%" alt="Header" />
+<img src="https://capsule-render.vercel.app/api?type=venom&color=0:0d1117,50:E63946,100:1D3557&height=300&section=header&text=Na0S&fontSize=60&fontColor=F1FAEE&animation=twinkling&desc=Prompt%20Injection%20Detector&descAlignY=62&descSize=22" width="100%" alt="Header" />
 
 <!-- Typing SVG Animation -->
 <a href="https://github.com/M-Abrisham/AI-Prompt-Injection-Detector">
@@ -10,33 +10,8 @@
 
 <br/>
 
-<!-- Primary Badges -->
 <p>
-  <img src="https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/tests-821%2B%20passing-3fb950?style=for-the-badge&logo=pytest&logoColor=white" alt="Tests" />
-  <img src="https://img.shields.io/github/actions/workflow/status/M-Abrisham/AI-Prompt-Injection-Detector/ci.yml?style=for-the-badge&logo=github-actions&logoColor=white&label=CI" alt="CI" />
-  <img src="https://img.shields.io/github/license/M-Abrisham/AI-Prompt-Injection-Detector?style=for-the-badge&color=457B9D" alt="License" />
-</p>
-
-<!-- Security Stats Badges -->
-<p>
-  <img src="https://img.shields.io/badge/%F0%9F%94%8D%20attack%20techniques-103%2B-E63946?style=for-the-badge" alt="Techniques" />
-  <img src="https://img.shields.io/badge/%F0%9F%9B%A1%EF%B8%8F%20defense%20layers-15%20built%20%7C%205%20planned-FF6B35?style=for-the-badge" alt="Layers" />
-  <img src="https://img.shields.io/badge/%F0%9F%93%8A%20training%20samples-126%2C245-1D3557?style=for-the-badge" alt="Samples" />
-  <img src="https://img.shields.io/badge/%F0%9F%8E%AF%20threat%20categories-19-457B9D?style=for-the-badge" alt="Categories" />
-</p>
-
-<!-- Social Badges -->
-<p>
-  <a href="https://github.com/M-Abrisham/AI-Prompt-Injection-Detector/stargazers">
-    <img src="https://img.shields.io/github/stars/M-Abrisham/AI-Prompt-Injection-Detector?style=for-the-badge&color=F1C40F&logo=github" alt="Stars" />
-  </a>
-  <a href="https://github.com/M-Abrisham/AI-Prompt-Injection-Detector/network/members">
-    <img src="https://img.shields.io/github/forks/M-Abrisham/AI-Prompt-Injection-Detector?style=for-the-badge&color=2ECC71&logo=github" alt="Forks" />
-  </a>
-  <a href="https://github.com/M-Abrisham/AI-Prompt-Injection-Detector/issues">
-    <img src="https://img.shields.io/github/issues/M-Abrisham/AI-Prompt-Injection-Detector?style=for-the-badge&color=E74C3C&logo=github" alt="Issues" />
-  </a>
+  <strong>15-Layer Defense | 103+ Attack Techniques | 126K Samples</strong>
 </p>
 
 </div>
