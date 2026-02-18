@@ -1,6 +1,15 @@
 import re
 import unicodedata
 
+# ftfy fixes mojibake (encoding mix-ups) — e.g. UTF-8 decoded as latin-1.
+# Graceful fallback: if not installed, mojibake repair is simply skipped.
+try:
+    import ftfy
+
+    _HAS_FTFY = True
+except ImportError:
+    _HAS_FTFY = False
+
 # Unicode whitespace variants that should become plain ASCII space.
 # Does NOT include \n, \r, \t — those are handled separately.
 _UNICODE_WHITESPACE_RE = re.compile(
@@ -66,6 +75,17 @@ def normalize_text(text):
     """
     flags = []
     original_len = len(text)
+
+    # Step 0: Mojibake repair via ftfy (before NFKC)
+    # Fixes encoding errors like UTF-8 decoded as latin-1:
+    #   "â€™" → "'"   "Ã©" → "é"   "â€œhelloâ€\x9d" → ""hello""
+    # fix_character_width is disabled because NFKC (step 1) already
+    # handles fullwidth→ASCII folding.
+    if _HAS_FTFY:
+        fixed = ftfy.fix_text(text, fix_character_width=False)
+        if fixed != text:
+            flags.append("mojibake_repaired")
+            text = fixed
 
     # Step 1: NFKC normalization
     # Collapses fullwidth chars, ligatures, superscripts, compatibility forms

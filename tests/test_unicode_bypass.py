@@ -431,15 +431,31 @@ class TestLineParagraphSeparators(unittest.TestCase):
         text = "ignore\u2028all\u2028previous"
         result, _, flags = normalize_text(text)
         self.assertNotIn("\u2028", result)
-        self.assertEqual(result, "ignore all previous")
-        self.assertIn("unicode_whitespace_normalized", flags)
+        # When ftfy is installed, U+2028 is converted to \n (Step 0)
+        # before Step 3's whitespace regex runs. Without ftfy, Step 3
+        # converts U+2028 to ASCII space instead.
+        try:
+            import ftfy
+            self.assertEqual(result, "ignore\nall\nprevious")
+            self.assertIn("mojibake_repaired", flags)
+        except ImportError:
+            self.assertEqual(result, "ignore all previous")
+            self.assertIn("unicode_whitespace_normalized", flags)
 
     def test_paragraph_separator_replaced(self):
         text = "ignore\u2029all\u2029previous"
         result, _, flags = normalize_text(text)
         self.assertNotIn("\u2029", result)
-        self.assertEqual(result, "ignore all previous")
-        self.assertIn("unicode_whitespace_normalized", flags)
+        # When ftfy is installed, U+2029 is converted to \n (Step 0)
+        # before Step 3's whitespace regex runs. Without ftfy, Step 3
+        # converts U+2029 to ASCII space instead.
+        try:
+            import ftfy
+            self.assertEqual(result, "ignore\nall\nprevious")
+            self.assertIn("mojibake_repaired", flags)
+        except ImportError:
+            self.assertEqual(result, "ignore all previous")
+            self.assertIn("unicode_whitespace_normalized", flags)
 
 
 class TestEdgeCaseInputs(unittest.TestCase):
