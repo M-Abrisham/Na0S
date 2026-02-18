@@ -15,7 +15,7 @@ genuinely malicious inputs.
 import re
 
 from .safe_pickle import safe_load
-from .rules import rule_score, rule_score_detailed
+from .rules import rule_score, rule_score_detailed, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .obfuscation import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
@@ -106,7 +106,7 @@ class WhitelistFilter:
     )
 
     ROLE_ASSIGNMENT = safe_compile(
-        r"you are now|from now on|new role|act as if you are",
+        ROLE_ASSIGNMENT_PATTERN,
         re.IGNORECASE,
     )
 
@@ -191,12 +191,6 @@ class WeightedClassifier:
     contributes a weighted score that must exceed a configurable threshold.
     """
 
-    SEVERITY_WEIGHTS = {
-        "critical": 0.3,
-        "high": 0.2,
-        "medium": 0.1,
-    }
-
     ML_WEIGHT = 0.6
     OBFUSCATION_WEIGHT_PER_FLAG = 0.15
     OBFUSCATION_WEIGHT_CAP = 0.3
@@ -229,7 +223,7 @@ class WeightedClassifier:
         rule_weight = 0.0
         max_severity = "medium"
         for hit in detailed_hits:
-            w = self.SEVERITY_WEIGHTS.get(hit.severity, 0.1)
+            w = SEVERITY_WEIGHTS.get(hit.severity, 0.1)
             rule_weight += w
             # Track the highest severity for override protection
             if hit.severity == "critical":

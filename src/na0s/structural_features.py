@@ -13,6 +13,8 @@ from collections import Counter
 
 import numpy as np
 
+from .rules import ROLE_ASSIGNMENT_PATTERN
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -26,7 +28,7 @@ _IMPERATIVE_VERBS = frozenset({
 })
 
 _ROLE_PATTERNS = re.compile(
-    r"you\s+are\s+now|act\s+as|pretend\s+to\s+be|your\s+new\s+role",
+    ROLE_ASSIGNMENT_PATTERN,
     re.IGNORECASE,
 )
 

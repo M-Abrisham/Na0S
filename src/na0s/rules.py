@@ -26,6 +26,23 @@ class RuleHit:
     severity: str = "medium"
 
 
+# Canonical role-assignment / roleplay pattern -- single source of truth.
+# Imported by cascade.py (WhitelistFilter) and structural_features.py so
+# all three detection layers stay in sync.
+#
+# Uses \s+ for whitespace-evasion resilience and \b for word boundaries.
+ROLE_ASSIGNMENT_PATTERN = (
+    r"\byou\s+are\s+now\b"
+    r"|\bpretend\s+to\s+be\b"
+    # FIX: "act as" tightened — require article/possessive + word, or
+    # capitalized name (DAN, Jailbreak, etc.) to reduce FPs from
+    # scientific/technical prose ("enzymes act as catalysts").
+    r"|\bact\s+as\s+(?:(?:a|an|the|my|if)\s+)?\w"
+    r"|\bfrom\s+now\s+on\b"
+    r"|\b(?:your\s+)?new\s+role\b"
+)
+
+
 RULES = [
     Rule("override",
          # FIX: {0,3} bounded quantifier for multi-word adjective chains.
@@ -48,13 +65,13 @@ RULES = [
          severity="high",
          description="System prompt extraction attempt"),
     Rule("roleplay",
-         r"\byou are now\b|\bpretend to be\b|\bact as\b",
+         ROLE_ASSIGNMENT_PATTERN,
          technique_ids=["D2.1", "D2.2"],
-         severity="medium",
+         severity="high",
          description="Persona/roleplay hijack attempt"),
     Rule("secrecy",
          r"don't tell (the user|anyone)|keep this secret",
-         technique_ids=["E1.4"],
+         technique_ids=["D1.2"],
          severity="medium",
          description="Secrecy instruction injection"),
     Rule("exfiltration",
@@ -63,6 +80,14 @@ RULES = [
          severity="high",
          description="Data exfiltration attempt"),
 ]
+
+# Severity-to-weight mapping for rule hits in weighted voting.
+# Canonical source -- imported by predict.py and cascade.py.
+SEVERITY_WEIGHTS = {
+    "critical": 0.3,
+    "high": 0.2,
+    "medium": 0.1,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +170,23 @@ _LEGITIMATE_ROLE = re.compile(
     re.IGNORECASE,
 )
 
+# Non-persona "act as" -- scientific/technical usage where "act as" means
+# "function as" rather than "roleplay as".  Suppresses FPs from prompts
+# like "How does aspirin act as an anti-inflammatory?" or "Enzymes act as
+# catalysts in biochemical reactions."
+# Note: (?:\w+\s+)? allows one adjective between article and noun
+# (e.g., "a voltage divider").  s? handles plurals ("catalysts").
+_NONPERSONA_ACT_AS = re.compile(
+    r'\bact\s+as\s+(?:(?:a|an|the)\s+)?(?:\w+\s+)?'
+    r'(?:catalysts?|buffers?|safeguards?|barriers?|bridges?|dividers?|'
+    r'filters?|gateways?|prox(?:y|ies)|intermediar(?:y|ies)|'
+    r'deterrents?|inhibitors?|mediators?|moderators?|'
+    r'substitutes?|replacements?|stimul(?:us|i)|receptors?|'
+    r'anti[- ]?\w+|insulators?|conductors?|solvents?|reagents?|'
+    r'amplifiers?|suppressors?|regulators?|stabilizers?|precursors?)\b',
+    re.IGNORECASE,
+)
+
 
 def _has_contextual_framing(text):
     """Return True if text discusses injection rather than performing it."""
@@ -156,8 +198,10 @@ def _has_contextual_framing(text):
 
 
 def _is_legitimate_roleplay(text):
-    """Return True if 'act as' refers to a legitimate benign role."""
-    return bool(_LEGITIMATE_ROLE.search(text))
+    """Return True if 'act as' refers to a legitimate benign role or
+    non-persona scientific/technical usage."""
+    return (bool(_LEGITIMATE_ROLE.search(text))
+            or bool(_NONPERSONA_ACT_AS.search(text)))
 
 
 # Rules that can be suppressed in educational/quoting/code/narrative context.

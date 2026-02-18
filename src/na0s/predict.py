@@ -7,7 +7,7 @@ from .layer0.timeout import (
     with_timeout,
 )
 from .obfuscation import obfuscation_scan
-from .rules import rule_score, rule_score_detailed, RULES
+from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load
 from .models import get_model_path
@@ -22,13 +22,6 @@ except ImportError:
 MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 DECISION_THRESHOLD = 0.55
-
-# Severity-to-weight mapping for rule hits in weighted voting
-_SEVERITY_WEIGHTS = {
-    "critical": 0.3,
-    "high": 0.2,
-    "medium": 0.1,
-}
 
 # Build a lookup from rule name -> severity for quick access
 _RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
@@ -145,7 +138,7 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
     for hit_name in hits:
         sev = _RULE_SEVERITY.get(hit_name, "medium")
         severities_seen.add(sev)
-        rule_weight += _SEVERITY_WEIGHTS.get(sev, 0.1)
+        rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
 
     # --- Obfuscation signal ---
     obf_weight = min(0.15 * len(obs_flags), 0.3)
@@ -196,10 +189,28 @@ def classify_prompt(text, vectorizer, model):
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
-        return label, prob, [], l0
+        return label, prob, [], l0, []
 
     clean = l0.sanitized_text
-    hits = rule_score(clean)
+
+    # Run rules on BOTH sanitized and raw text, then union the results.
+    # Sanitized text catches payloads revealed by L0 normalization (e.g.
+    # fullwidth Unicode, invisible chars).  Raw text catches payloads
+    # whose regex anchors are disrupted by normalization.  Union keeps
+    # the broader detection surface while deduplicating by rule name.
+    sanitized_detailed = rule_score_detailed(clean)
+    raw_detailed = rule_score_detailed(text) if text != clean else []
+    # Merge: deduplicate by rule name, sanitized hits take precedence
+    seen_names = set()
+    detailed_hits = []
+    for rh in sanitized_detailed:
+        seen_names.add(rh.name)
+        detailed_hits.append(rh)
+    for rh in raw_detailed:
+        if rh.name not in seen_names:
+            seen_names.add(rh.name)
+            detailed_hits.append(rh)
+    hits = [rh.name for rh in detailed_hits]
 
     # Layer 3: Structural Features — extract non-lexical signals
     structural = None
@@ -246,7 +257,7 @@ def classify_prompt(text, vectorizer, model):
         except (sqlite3.Error, OSError):
             pass  # non-critical — don't break classification
 
-    return label, composite, hits, l0
+    return label, composite, hits, l0, detailed_hits
 
 
 def scan(text, vectorizer=None, model=None):
@@ -260,7 +271,7 @@ def scan(text, vectorizer=None, model=None):
         vectorizer, model = predict_prompt()
 
     try:
-        label, prob, hits, l0 = with_timeout(
+        label, prob, hits, l0, detailed_hits = with_timeout(
             classify_prompt,
             SCAN_TIMEOUT,
             text, vectorizer, model,
@@ -308,7 +319,6 @@ def scan(text, vectorizer=None, model=None):
 
     # Collect technique_tags from rule hits and L0 anomaly flags
     technique_tags = []
-    detailed_hits = rule_score_detailed(l0.sanitized_text)
     for rh in detailed_hits:
         technique_tags.extend(rh.technique_ids)
 
@@ -321,15 +331,15 @@ def scan(text, vectorizer=None, model=None):
         chunk_hits_set = set()
         chunk_technique_tags = []
         # Analyse HEAD+TAIL extract
-        ht_hits = rule_score(ht_text)
-        chunk_hits_set.update(ht_hits)
-        for rh in rule_score_detailed(ht_text):
+        ht_detailed = rule_score_detailed(ht_text)
+        chunk_hits_set.update(rh.name for rh in ht_detailed)
+        for rh in ht_detailed:
             chunk_technique_tags.extend(rh.technique_ids)
         # Analyse each chunk
         for chunk in chunks:
-            c_hits = rule_score(chunk)
-            chunk_hits_set.update(c_hits)
-            for rh in rule_score_detailed(chunk):
+            c_detailed = rule_score_detailed(chunk)
+            chunk_hits_set.update(rh.name for rh in c_detailed)
+            for rh in c_detailed:
                 chunk_technique_tags.extend(rh.technique_ids)
 
         # Merge new discoveries into main lists
@@ -503,7 +513,7 @@ if __name__ == "__main__":
 
     print("\n--- Prompt Injection Detector ---\n")
     for prompt in test_prompts:
-        label, confidence, hits, l0 = classify_prompt(prompt, vectorizer, model)
+        label, confidence, hits, l0, _detailed = classify_prompt(prompt, vectorizer, model)
 
         if l0.rejected:
             print("BLOCKED: {0} | reason: {1}".format(prompt[:50], l0.rejection_reason))

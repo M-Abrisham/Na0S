@@ -321,8 +321,13 @@ class TestCascadePatternsAreSafe(unittest.TestCase):
             r"(?<!\w)[0-9a-fA-F]{16,}(?!\w)",
             # _URLENCODE_HEURISTIC (rewritten safe version)
             r"%[0-9a-fA-F]{2}.{0,200}%[0-9a-fA-F]{2}",
-            # ROLE_ASSIGNMENT
-            r"you are now|from now on|new role|act as if you are",
+            # ROLE_ASSIGNMENT -- imported from canonical source in rules.py;
+            # inline copy kept here only for safe_compile audit coverage.
+            (r"\byou\s+are\s+now\b"
+             r"|\bpretend\s+to\s+be\b"
+             r"|\bact\s+as\s+(?:(?:a|an|the|my|if)\s+)?\w"
+             r"|\bfrom\s+now\s+on\b"
+             r"|\b(?:your\s+)?new\s+role\b"),
             # SAFE_TOPIC_INDICATORS
             (r"\b(explain|what is|how does|teach me|help me understand"
              r"|learn about|definition of)\b"),
