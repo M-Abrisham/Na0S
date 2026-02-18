@@ -317,20 +317,118 @@ def has_invisible_chars(text):
     return False
 
 
+def _count_invisible_chars(text):
+    """Count invisible/control characters that strip_invisible_chars removes.
+
+    Returns the number of characters that would be stripped (Cf, Cs, Cc, Cn
+    excluding newlines, carriage returns, tabs, and spaces).
+    """
+    count = 0
+    for char in text:
+        cat = unicodedata.category(char)
+        if cat == "Cs":
+            count += 1
+        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+            count += 1
+    return count
+
+
 def strip_invisible_chars(text):
     """Remove invisible/control Unicode characters. Preserves newlines, tabs.
 
     Also strips lone surrogates (category Cs) — these are invalid in UTF-8
     interchange and crash downstream encoders (hashlib, tiktoken).
+
+    Word-boundary restoration (two-pass approach):
+      Pass 1: Strip all invisible/control characters, producing a clean string.
+      Pass 2: Where invisible chars were removed between two groups of 2+
+              word-forming characters, insert a single space to restore the
+              word boundary that the invisible char was replacing.
+
+    This handles two distinct D5.2 evasion patterns correctly:
+      - Per-letter splitting:  "i<ZWSP>g<ZWSP>n<ZWSP>o<ZWSP>r<ZWSP>e" -> "ignore"
+        (invisible chars between single characters = intra-word, just strip)
+      - Word-boundary hiding: "ignore<ZWSP>all<ZWSP>previous" -> "ignore all previous"
+        (invisible chars between multi-char groups = inter-word, insert space)
+
+    The heuristic: if a removed invisible char has >= 2 word-forming characters
+    on BOTH sides before the next gap/space/non-word, it was likely a word
+    boundary and gets replaced with a space.
     """
-    result = []
+    # Build a list of (char, is_visible) pairs to analyze context.
+    # First, categorize each character.
+    chars_info = []  # list of (char, is_invisible_to_strip)
     for char in text:
         cat = unicodedata.category(char)
         if cat == "Cs":
-            continue  # Always strip surrogates
-        if cat not in ("Cf", "Cc", "Cn") or char in "\n\r\t ":
-            result.append(char)
-    return "".join(result)
+            chars_info.append((char, True))
+        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+            chars_info.append((char, True))
+        else:
+            chars_info.append((char, False))
+
+    # Now build the result, deciding whether to insert spaces.
+    # Strategy: scan segments between invisible-char gaps.
+    # A "segment" is a run of visible characters.
+    # If two adjacent segments both have length >= 2 (in word chars),
+    # insert a space between them; otherwise just concatenate.
+    segments = []
+    current_segment = []
+    had_invisible_between = False
+
+    for char, is_invisible in chars_info:
+        if is_invisible:
+            if current_segment:
+                segments.append(("".join(current_segment), had_invisible_between))
+                current_segment = []
+                had_invisible_between = False
+            had_invisible_between = True
+        else:
+            current_segment.append(char)
+
+    if current_segment:
+        segments.append(("".join(current_segment), had_invisible_between))
+
+    if not segments:
+        return ""
+
+    result_parts = [segments[0][0]]
+    for i in range(1, len(segments)):
+        seg_text, preceded_by_invisible = segments[i]
+        if not preceded_by_invisible:
+            result_parts.append(seg_text)
+            continue
+
+        prev_seg = segments[i - 1][0]
+        # Count trailing word chars in previous segment
+        prev_word_len = 0
+        for ch in reversed(prev_seg):
+            if ch.isalpha() or ch.isdigit():
+                prev_word_len += 1
+            else:
+                break
+
+        # Count leading word chars in current segment
+        cur_word_len = 0
+        for ch in seg_text:
+            if ch.isalpha() or ch.isdigit():
+                cur_word_len += 1
+            else:
+                break
+
+        # Insert space only if both sides have 3+ word chars.
+        # Groups of 1-2 chars indicate per-letter splitting or intra-word
+        # breaks (e.g. soft hyphen in "ig\u00adnore") where we want plain
+        # concatenation to reconstruct the word.  Groups of 3+ chars are
+        # likely complete words (e.g. "ignore\u200ball") where invisible
+        # chars replaced word boundaries.
+        if prev_word_len >= 3 and cur_word_len >= 3:
+            # Also check the previous segment doesn't already end with space
+            if prev_seg and prev_seg[-1] not in (" ", "\n", "\r", "\t"):
+                result_parts.append(" ")
+        result_parts.append(seg_text)
+
+    return "".join(result_parts)
 
 
 def _ftfy_fix_with_sentinel(text):
@@ -427,9 +525,11 @@ def normalize_text(text):
 
     # Step 2: Invisible character stripping
     if has_invisible_chars(text):
-        before_strip = len(text)
+        # Count actual invisible chars before stripping.  Cannot use
+        # length difference because strip_invisible_chars() may INSERT
+        # spaces at word boundaries, offsetting the count.
+        invisible_count = _count_invisible_chars(text)
         text = strip_invisible_chars(text)
-        invisible_count = before_strip - len(text)
         # Only flag if >2 invisible chars — a single zero-width space from
         # copy-paste is normal; a cluster of them is evasion
         if invisible_count > 2:

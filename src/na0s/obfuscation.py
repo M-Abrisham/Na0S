@@ -158,8 +158,41 @@ def obfuscation_scan(text, max_decodes=2):
     # Research ref: InjecGuard (arxiv 2410.22770) trigger-word bias analysis,
     # TruffleHog entropy tuning (github.com/trufflesecurity/truffleHog/issues/168),
     # PHP webshell entropy (LinkedIn/Amir Rasa: benign <4.5, encoded >5.0).
+    #
+    # Length-adaptive threshold (2026-02 fix): Long benign text (>200 chars)
+    # naturally has character-level entropy 4.3-4.5 due to diverse vocabulary,
+    # varied punctuation, and digit usage.  This is NOT obfuscation — it's
+    # just rich natural language.  True obfuscation (base64, encoded payloads,
+    # encrypted blobs) exceeds 4.7 even for long text.  Short attack payloads
+    # (<= 200 chars) are kept at the 4.1 threshold since short obfuscated
+    # strings with entropy 4.1-4.5 are legitimately suspicious.
+    #
+    # Structured data exemption: Markdown tables, code fences, and similar
+    # formats legitimately produce high entropy from special characters
+    # (backticks, pipes, braces).  These are already exempted for
+    # punctuation_flood and weird_casing; apply the same exemption here.
     entropy = shannon_entropy(text)
-    if entropy >= 4.1:
+    text_len = len(text)
+    has_code_fence = bool(_CODE_FENCE_RE.search(text))
+    if has_code_fence:
+        # Code fences (``` blocks) produce high entropy from special
+        # characters (backticks, colons, parens, indentation) even in
+        # short benign code snippets.  Exempt code blocks entirely from
+        # high_entropy unless entropy is extreme (base64 blobs inside code).
+        # This applies at ALL lengths since code blocks are unambiguously
+        # structured (unlike table pipes which match false positives like
+        # <|prompt|>...<|response|>).
+        entropy_threshold = 5.0
+    elif text_len > 200:
+        # Long natural text: raise threshold to avoid FPs on prose/code/Q&A.
+        # Natural English prose has entropy 4.3-4.5; only base64/encrypted
+        # content exceeds 4.7.
+        entropy_threshold = 4.7
+    else:
+        # Short text (<= 200 chars): keep sensitive threshold for
+        # obfuscation detection on short attack payloads.
+        entropy_threshold = 4.1
+    if entropy >= entropy_threshold:
         flags.append("high_entropy")
         score += 1
 

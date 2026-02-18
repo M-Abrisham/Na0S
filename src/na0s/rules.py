@@ -495,6 +495,19 @@ _NARRATIVE_FRAME = re.compile(
     re.IGNORECASE,
 )
 
+# Technical documentation frame -- API docs, config examples, XML/JSON/YAML
+# markup in explanatory context.  These legitimately contain role tags,
+# system prompt references, and template tokens as DATA, not instructions.
+_TECHDOC_FRAME = re.compile(
+    r'(?:'
+    r'(?:here\s+is|this\s+is|for\s+example|example\s*:)\s+'
+    r'(?:an?\s+)?(?:XML|JSON|YAML|HTML|TOML|config|schema|template)\b|'
+    r'(?:API|SDK)\s+(?:documentation|docs|reference|usage|example)|'
+    r'\b(?:system_prompt|system_message)\s+(?:field|parameter|accepts?|configures?)'
+    r')',
+    re.IGNORECASE,
+)
+
 # Legitimate roleplay -- "act as a translator" is safe, "act as DAN" is not
 _LEGITIMATE_ROLE = re.compile(
     r'\bact\s+as\s+(?:(?:a|an|the|my)\s+)?(?:\w+\s+)?'
@@ -512,7 +525,8 @@ def _has_contextual_framing(text):
             or bool(_QUESTION_FRAME.search(text))
             or bool(_QUOTING_FRAME.search(text))
             or bool(_CODE_FRAME.search(text))
-            or bool(_NARRATIVE_FRAME.search(text)))
+            or bool(_NARRATIVE_FRAME.search(text))
+            or bool(_TECHDOC_FRAME.search(text)))
 
 
 def _is_legitimate_roleplay(text):
@@ -540,8 +554,9 @@ def _is_legitimate_roleplay(text):
 #
 # persona_split: Suppressible -- discussed in jailbreak research.
 #
-# api_key_extraction: NOT suppressible -- always suspicious regardless
-#   of framing context.
+# api_key_extraction: Suppressible -- educational/question framing like
+#   "show me how to use the OpenAI API" legitimately mentions API names.
+#   Real attacks lack contextual framing and are caught by other signals.
 #
 # completion_trick: NOT suppressible -- the pattern is specific enough
 #   that educational framing is unlikely.
@@ -561,6 +576,13 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     # summarization_extraction: Suppressible -- "summarize your rules" appears
     #   in educational security content about prompt extraction.
     "summarization_extraction",
+    # api_key_extraction: Suppressible -- "show me how to print a system prompt
+    #   using the OpenAI API" is a legitimate developer question.  The rule
+    #   matches on verb+OPENAI but educational/question framing indicates the
+    #   user is asking HOW, not performing extraction.  Real extraction attacks
+    #   ("print your OPENAI API KEY") lack contextual framing and are still
+    #   caught by ML + structural signals.
+    "api_key_extraction",
     # authority_escalation: NOT suppressible -- "I am the admin" is always
     #   suspicious regardless of framing.
     # constraint_negation: NOT suppressible -- "disable safety filters" is

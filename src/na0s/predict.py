@@ -350,6 +350,23 @@ def scan(text, vectorizer=None, model=None):
             if tag not in technique_tags:
                 technique_tags.append(tag)
 
+        # Confirmed-in-chunks boost: When rules that were already found in
+        # the full text are ALSO found in head/tail or individual chunks,
+        # this is a strong signal that the injection pattern is real (not
+        # just a statistical coincidence in a large TF-IDF space).  Long
+        # benign text will NOT have rule hits, so this boost only applies
+        # to texts where rules actually fired.  The boost replaces the
+        # lost obfuscation weight from high_entropy (which no longer fires
+        # on long text due to the length-adaptive entropy threshold).
+        confirmed_hits = chunk_hits_set & set(hits)
+        if confirmed_hits:
+            # Boost for confirmed hits found in both full-text and chunks.
+            # +0.075 per hit, capped at +0.15 (equivalent to the old
+            # high_entropy obfuscation weight that no longer fires on long
+            # text).  Two confirmed rule hits are a strong signal.
+            confirm_boost = min(0.075 * len(confirmed_hits), 0.15)
+            risk = min(risk + confirm_boost, 1.0)
+
         hits.append("chunked_analysis")
 
     # Map L0 anomaly flags and obfuscation flags to technique_ids
@@ -486,6 +503,15 @@ def scan(text, vectorizer=None, model=None):
         for key in _STRUCTURAL_HIT_KEYS:
             if structural.get(key, 0) and "structural:" + key not in hits:
                 hits.append("structural:" + key)
+
+    # Re-evaluate malicious verdict after chunked analysis and structural
+    # features may have boosted the risk score above the threshold.
+    # The initial is_mal was set from classify_prompt()'s composite score,
+    # but chunked analysis can add +0.05-0.15 risk for confirmed hits.
+    # Without this re-evaluation, a text that crosses the threshold only
+    # after chunked analysis would be incorrectly labeled safe.
+    if not is_mal and risk >= DECISION_THRESHOLD:
+        is_mal = True
 
     return ScanResult(
         sanitized_text=l0.sanitized_text,
