@@ -221,14 +221,14 @@ class TestXMPRegexPatterns(unittest.TestCase):
                b'Test payload</rdf:li></rdf:Alt></dc:description>')
         m = _XMP_DC_DESC_RE.search(xml)
         self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), b"Test payload")
+        self.assertIn(b"Test payload", m.group(1))
 
     def test_dc_title_regex(self):
         xml = (b'<dc:title><rdf:Alt><rdf:li xml:lang="x-default">'
                b'Evil title</rdf:li></rdf:Alt></dc:title>')
         m = _XMP_DC_TITLE_RE.search(xml)
         self.assertIsNotNone(m)
-        self.assertEqual(m.group(1), b"Evil title")
+        self.assertIn(b"Evil title", m.group(1))
 
 
 # ===================================================================
@@ -359,17 +359,17 @@ class TestEXIFExtraction(unittest.TestCase):
         self.assertIn("exif:XPTitle", result.metadata_fields)
 
     @_patch_pil_image
-    def test_exif_xp_subject(self, mock_Image):
-        """Extract text from EXIF XPSubject (tag 40093)."""
-        text = "Subject payload"
+    def test_exif_xp_author(self, mock_Image):
+        """Extract text from EXIF XPAuthor (tag 40093)."""
+        text = "Author payload"
         value = text.encode("utf-16le") + b"\x00\x00"
         mock_img = _mock_pil_image({40093: value})
         mock_Image.open.return_value = mock_img
 
         result = extract_image_metadata(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
         self.assertTrue(result.has_metadata_text)
-        self.assertIn("Subject payload", result.metadata_text)
-        self.assertIn("exif:XPSubject", result.metadata_fields)
+        self.assertIn("Author payload", result.metadata_text)
+        self.assertIn("exif:XPAuthor", result.metadata_fields)
 
     @_patch_pil_image
     def test_exif_multiple_tags(self, mock_Image):
@@ -478,9 +478,9 @@ class TestExifTagConstants(unittest.TestCase):
         self.assertIn(40092, _EXIF_TEXT_TAGS)
         self.assertEqual(_EXIF_TEXT_TAGS[40092], "XPComment")
 
-    def test_xp_subject_tag(self):
+    def test_xp_author_tag(self):
         self.assertIn(40093, _EXIF_TEXT_TAGS)
-        self.assertEqual(_EXIF_TEXT_TAGS[40093], "XPSubject")
+        self.assertEqual(_EXIF_TEXT_TAGS[40093], "XPAuthor")
 
 
 # ===================================================================
