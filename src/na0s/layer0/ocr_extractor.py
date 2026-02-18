@@ -59,6 +59,12 @@ except ImportError:
 #: Maximum allowed image size in bytes (default 10 MB, env-configurable).
 MAX_IMAGE_BYTES: int = int(os.getenv("L0_MAX_IMAGE_BYTES", 10 * 1024 * 1024))
 
+#: Maximum metadata text bytes to extract (default 64 KB, env-configurable).
+#: Prevents DoS from images with huge EXIF/XMP metadata blocks.
+MAX_METADATA_TEXT_BYTES: int = int(
+    os.getenv("L0_MAX_METADATA_TEXT_BYTES", 65536)
+)
+
 #: Supported image magic-byte signatures.
 _IMAGE_SIGNATURES: list[tuple[bytes, str]] = [
     (b"\x89PNG\r\n\x1a\n", "png"),
@@ -118,13 +124,27 @@ class ImageMetadataResult:
 # EXIF tag IDs of interest (text-carrying tags)
 # ---------------------------------------------------------------------------
 
-#: EXIF tag ID -> human-readable name
+#: EXIF tag ID -> human-readable name.
+#: Covers all standard text-carrying tags an attacker could use to smuggle
+#: injection payloads invisible to OCR.  Verified via PIL round-trip.
+#:
+#: Security audit (2026-02-18) findings:
+#:   - 40093 is XPAuthor, NOT XPSubject (was mislabelled)
+#:   - 40094 (XPKeywords) and 40095 (XPSubject) were missing entirely
+#:   - Artist/Copyright/Software/DocumentName are commonly editable via
+#:     ExifTool and can carry arbitrary text payloads
 _EXIF_TEXT_TAGS: dict[int, str] = {
+    269: "DocumentName",
     270: "ImageDescription",
+    305: "Software",
+    315: "Artist",
+    33432: "Copyright",
     37510: "UserComment",
     40091: "XPTitle",
     40092: "XPComment",
-    40093: "XPSubject",
+    40093: "XPAuthor",      # FIXED: was incorrectly "XPSubject"
+    40094: "XPKeywords",    # NEW: was missing
+    40095: "XPSubject",     # NEW: this is the real XPSubject
 }
 
 #: Regex to find XMP metadata blocks in raw bytes.
@@ -132,17 +152,25 @@ _XMP_BLOCK_RE = re.compile(
     rb"<x:xmpmeta[^>]*>(.+?)</x:xmpmeta>", re.DOTALL
 )
 
-#: Regex to extract dc:description text from XMP XML.
-_XMP_DC_DESC_RE = re.compile(
-    rb"<dc:description[^>]*>.*?<rdf:Alt[^>]*>.*?"
-    rb"<rdf:li[^>]*>([^<]+)</rdf:li>",
+#: Regex to extract ALL rdf:li entries from a dc: field (multi-language).
+#: Captures both plain text and CDATA-wrapped content.
+#: Uses findall() so all language variants are extracted, not just the first.
+_XMP_RDF_LI_RE = re.compile(
+    rb"<rdf:li[^>]*>"
+    rb"(?:<!\[CDATA\[(.*?)\]\]>|([^<]+))"
+    rb"</rdf:li>",
     re.DOTALL,
 )
 
-#: Regex to extract dc:title text from XMP XML.
+#: Regex to extract the dc:description block (which contains rdf:li entries).
+_XMP_DC_DESC_RE = re.compile(
+    rb"<dc:description[^>]*>(.*?)</dc:description>",
+    re.DOTALL,
+)
+
+#: Regex to extract the dc:title block.
 _XMP_DC_TITLE_RE = re.compile(
-    rb"<dc:title[^>]*>.*?<rdf:Alt[^>]*>.*?"
-    rb"<rdf:li[^>]*>([^<]+)</rdf:li>",
+    rb"<dc:title[^>]*>(.*?)</dc:title>",
     re.DOTALL,
 )
 
@@ -227,6 +255,14 @@ def extract_image_metadata(image_data: bytes) -> ImageMetadataResult:
         warnings.append("XMP extraction error: {}".format(exc))
 
     combined = "\n".join(texts).strip()
+
+    # Truncate to prevent DoS from oversized metadata
+    if len(combined) > MAX_METADATA_TEXT_BYTES:
+        combined = combined[:MAX_METADATA_TEXT_BYTES]
+        warnings.append(
+            "Metadata text truncated to {} bytes".format(MAX_METADATA_TEXT_BYTES)
+        )
+
     return ImageMetadataResult(
         metadata_text=combined,
         metadata_fields=fields_found,
@@ -463,6 +499,20 @@ def _decode_exif_value(value) -> str:
                     return value[8:].decode("ascii", errors="replace").strip("\x00 ")
                 except Exception:
                     pass
+            elif charset_id == b"JIS\x00\x00\x00\x00\x00":
+                try:
+                    return value[8:].decode("iso2022_jp", errors="replace").strip("\x00 ")
+                except Exception:
+                    pass
+            elif charset_id == b"\x00\x00\x00\x00\x00\x00\x00\x00":
+                # Undefined charset — try UTF-8 then latin-1
+                try:
+                    return value[8:].decode("utf-8", errors="strict").strip("\x00 ")
+                except Exception:
+                    try:
+                        return value[8:].decode("latin-1", errors="replace").strip("\x00 ")
+                    except Exception:
+                        pass
 
         # Detect UTF-16LE: if every other byte is \x00, try UTF-16LE first.
         # This handles Windows XP tags which are UTF-16LE encoded.
@@ -526,26 +576,39 @@ def _extract_xmp_text(raw_bytes: bytes) -> tuple[list[str], list[str]]:
 
     xmp_block = xmp_match.group(0)
 
-    # Extract dc:description
+    # Extract dc:description (all language variants + CDATA)
     desc_match = _XMP_DC_DESC_RE.search(xmp_block)
     if desc_match:
-        try:
-            desc = desc_match.group(1).decode("utf-8", errors="replace").strip()
-            if desc:
-                texts.append(desc)
-                fields.append("xmp:dc:description")
-        except Exception:
-            pass
+        desc_texts = _extract_rdf_li_texts(desc_match.group(1))
+        if desc_texts:
+            texts.extend(desc_texts)
+            fields.append("xmp:dc:description")
 
-    # Extract dc:title
+    # Extract dc:title (all language variants + CDATA)
     title_match = _XMP_DC_TITLE_RE.search(xmp_block)
     if title_match:
-        try:
-            title = title_match.group(1).decode("utf-8", errors="replace").strip()
-            if title:
-                texts.append(title)
-                fields.append("xmp:dc:title")
-        except Exception:
-            pass
+        title_texts = _extract_rdf_li_texts(title_match.group(1))
+        if title_texts:
+            texts.extend(title_texts)
+            fields.append("xmp:dc:title")
 
     return texts, fields
+
+
+def _extract_rdf_li_texts(rdf_block: bytes) -> list[str]:
+    """Extract text from all ``<rdf:li>`` entries in a dc: field block.
+
+    Handles both plain text and ``<![CDATA[...]]>`` wrapped content.
+    Returns a list of non-empty strings (one per language variant).
+    """
+    results: list[str] = []
+    for cdata_text, plain_text in _XMP_RDF_LI_RE.findall(rdf_block):
+        raw = cdata_text or plain_text
+        if raw:
+            try:
+                decoded = raw.decode("utf-8", errors="replace").strip()
+                if decoded:
+                    results.append(decoded)
+            except Exception:
+                pass
+    return results
