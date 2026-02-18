@@ -58,7 +58,7 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **BUG-9 (LOW)**: `predict_embedding.py` does NOT call `layer0_sanitize()` — embedding model receives raw input. ✅ DONE (2026-02-14)
 
 #### NEW (Discovered by research, not in original roadmap)
-- [ ] **ftfy integration** for mojibake repair (fixes broken Unicode from encoding mismatches). Pure Python, complements NFKC. **Effort**: Easy. `pip install ftfy`, call `ftfy.fix_text()` before NFKC.
+- [x] **ftfy integration** for mojibake repair (fixes broken Unicode from encoding mismatches). Pure Python, complements NFKC. **Effort**: Easy. `pip install ftfy`, call `ftfy.fix_text()` before NFKC. ✅ DONE (2026-02-17) — Added as Step 0 in normalization.py (before NFKC), graceful fallback if not installed, `fix_character_width=False` to avoid NFKC overlap, `mojibake_repaired` anomaly flag, 22 tests in test_ftfy_integration.py. Also includes workarounds for ftfy upstream bugs: #222 (string-start boundary fix), #149 (post-ftfy integrity validation against wrong corrections), version pinned to `>=6.2,<7` (6.2 fixes critical #202 Cyrillic bug).
 - [ ] **Cyrillic homoglyph confusable mapping (D5.3)** using Unicode TR39 `confusables.txt` or `confusable_homoglyphs` library. NFKC does NOT normalize Cyrillic а→Latin a. This is an active known gap confirmed by tests. **Effort**: Medium. Need confusables table (~10KB data file).
 - [ ] **Unicode Tag Characters stego (U+E0001-U+E007F)** — invisible chars that map 1:1 to ASCII. Currently stripped by L0 but decoded message is never extracted. **Effort**: Easy (5 lines).
 - [ ] **Variation Selector stego detection** — variation selectors can encode binary data. **Effort**: Easy.
@@ -125,7 +125,7 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 
 ### Implementation Plan
 **Phase 1 (P0 — Critical fixes)**: ~~Fix BUG-1 through BUG-9, wire L0 into cascade.py and predict_embedding.py, complete `_L0_FLAG_MAP`~~ ✅ DONE (2026-02-14)
-**Phase 2 (P1 — Core gaps)**: Add timeout enforcement, ftfy, Cyrillic confusables, property-based tests, Hypothesis fuzzing
+**Phase 2 (P1 — Core gaps)**: Add timeout enforcement, ~~ftfy~~✅, Cyrillic confusables, property-based tests, Hypothesis fuzzing
 **Phase 3 (P2 — Extensions)**: OCR, doc parsing, MIME, file/URL input
 
 ---
@@ -1665,10 +1665,12 @@ pie title Attack Category Distribution
 - [ ] Add a mapping diagram (Mermaid or table) showing: `Your Technique → OWASP LLM01 → MITRE ATLAS T0051`
 
 #### 4.4 Project Governance Files
-- [ ] Create `SECURITY.md` — responsible disclosure policy (critical for a security tool)
-- [ ] Create `CONTRIBUTING.md` — how to contribute, coding standards, PR process
+- [x] Create `SECURITY.md` — responsible disclosure policy (critical for a security tool) ✅ DONE (2026-02-17) — 199 lines: 90-day coordinated disclosure, Na0S-specific scope (detection bypasses, model poisoning, evasion), safe harbor, Hall of Fame. Based on ISO 29147, OWASP, OpenSSF guidelines.
+- [x] Create `CONTRIBUTING.md` — how to contribute, coding standards, PR process ✅ DONE (2026-02-17) — 10 sections: dev setup, project structure, coding standards (flake8, thread safety), testing conventions, PR process, how to add detection rules, FP/FN reporting, code of conduct.
 - [ ] Create `CODE_OF_CONDUCT.md` — standard Contributor Covenant
-- [ ] Add GitHub issue templates (`.github/ISSUE_TEMPLATE/bug_report.md`, `feature_request.md`)
+- [x] Add GitHub issue templates (`.github/ISSUE_TEMPLATE/bug_report.md`, `feature_request.md`) ✅ DONE (2026-02-17) — 4 YAML issue forms + config: bug_report.yml, feature_request.yml, false_positive.yml, false_negative.yml. Modern form format with dropdowns, required fields, taxonomy-aligned categories. Blank issues disabled, security reports routed to SECURITY.md.
+- [x] Create `CHANGELOG.md` — document v0.1.0 release ✅ DONE (2026-02-17) — Full v0.1.0 changelog covering all 12 defense layers, testing, CI/CD, packaging.
+- [x] Set up branch protection on main ✅ DONE (2026-02-17) — `gh api` command provided: require 1 PR review, 5 CI status checks (Python 3.9-3.12 + pr-validation), dismiss stale reviews, no force push/deletion, admin bypass for emergencies.
 
 #### 4.5 Socialify Repo Card
 - [ ] Generate a social card via [socialify.git.ci](https://socialify.git.ci/) for the repo
