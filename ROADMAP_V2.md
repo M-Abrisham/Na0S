@@ -1074,7 +1074,7 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 - [ ] **Pre-commit hooks** — black/ruff formatting, bandit security, trailing whitespace. **Priority**: P0. **Effort**: 2 hours.
 - [ ] **pyproject.toml** — Package as installable library with declared dependencies. **Priority**: P1. **Effort**: 3-4 hours.
 - [ ] **Makefile** — Targets: test, lint, train, evaluate, sync. **Priority**: P1. **Effort**: 1-2 hours.
-- [ ] **Integration tests** — End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Priority**: P1. **Effort**: 4-6 hours.
+- [x] **Integration tests** — DONE (2026-02-17): 7 test files, 288 tests (244 pass + 44 expected failures). Covers D1 instruction override (41), D3 structural boundary (44), D5 unicode evasion (30), E1 prompt extraction (46), E2 reconnaissance (37), O1/O2 harmful content (44), plus general integration (46). End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Priority**: P1.
 - [ ] **Regression dashboard** — Track detection rates, FPR, latency over time. **Priority**: P1.
 - [ ] **Per-technique attribution metrics** — Track `attribution_correct` flag and confusion pairs per technique_id. Enables identifying which techniques generate FPs (e.g., D3.4 markdown vs benign markdown) and which get misclassified as other techniques. **Priority**: P1. **Effort**: Medium.
 - [x] **Property-based testing (Hypothesis)** — DONE (2026-02-14): `test_layer0_hypothesis.py` with 40 property-based tests. Full Unicode/bytes fuzzing of L0. Found surrogate crash bug. **Priority**: P1.
