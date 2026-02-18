@@ -1,0 +1,76 @@
+name: Feature Request
+description: Suggest a new feature or improvement for Na0S
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement to Na0S. Please describe the feature you would like to see.
+
+  - type: textarea
+    id: problem-description
+    attributes:
+      label: Problem Description
+      description: What problem does this feature solve? Is this related to a frustration or limitation you have encountered?
+      placeholder: "e.g., I frequently encounter false positives when scanning code snippets because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution or behavior you would like.
+      placeholder: Describe your proposed solution in detail.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions or workarounds you have considered.
+      placeholder: Describe any alternatives you have tried or considered.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: affected-layer
+    attributes:
+      label: Affected Layer
+      description: Which detection layer does this feature relate to?
+      options:
+        - Layer 0 -- Input Normalization (Unicode, HTML, encoding)
+        - Layer 1 -- Heuristic Rules
+        - Layer 2 -- ML Classifier
+        - Layer 3 -- Embedding Similarity
+        - Layer 4 -- Fingerprint Store
+        - Layer 5 -- Obfuscation Engine
+        - Layer 6 -- Tokenization Anomaly Detection
+        - Layer 7 -- Sliding Window Analysis
+        - Layer 8 -- Output Scanning
+        - Layer 9 -- Multi-Turn Detection
+        - Layer 10 -- Rate Limiting / Resource Protection
+        - Layer 11 -- Ensemble / Aggregation
+        - New Layer (describe below)
+        - Not layer-specific / General
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Describe the real-world scenario where this feature would be used.
+      placeholder: "e.g., When deploying Na0S as middleware for a chatbot API, I need..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context, references, or examples about the feature request.
+    validations:
+      required: false

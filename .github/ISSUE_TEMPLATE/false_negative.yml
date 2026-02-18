@@ -1,0 +1,115 @@
+name: False Negative Report
+description: Report an attack payload that Na0S failed to detect
+title: "[FN] "
+labels: ["false-negative"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        False negative reports are critical security feedback. A missed prompt injection is a potential vulnerability for any system relying on Na0S for protection.
+
+        **Content warning**: This template asks you to provide attack payloads. These are used solely to improve detection coverage. Do not include payloads that could cause real harm if shared publicly (e.g., working malware, exploit code). If the payload is sensitive, consider using the security vulnerability reporting process instead (see SECURITY.md).
+
+  - type: textarea
+    id: attack-payload
+    attributes:
+      label: Attack Payload
+      description: |
+        The exact input text that should have been detected as a prompt injection but was not.
+        Wrap the payload in a code block if it contains special characters or formatting.
+      placeholder: Paste the attack payload here.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: attack-category
+    attributes:
+      label: Attack Category
+      description: Which category from the Na0S Threat Taxonomy does this attack belong to? See THREAT_TAXONOMY.md for full details.
+      options:
+        - D1 -- Instruction Override
+        - D2 -- Persona / Roleplay Hijack
+        - D3 -- Structural Boundary Injection
+        - D4 -- Obfuscation / Encoding
+        - D5 -- Unicode Evasion
+        - D6 -- Multilingual Injection
+        - D7 -- Payload Delivery Tricks
+        - D8 -- Context Window Manipulation
+        - I1 -- Data Source Poisoning (Indirect)
+        - I2 -- HTML / Markup Injection (Indirect)
+        - E1 -- System Prompt Extraction
+        - E2 -- Active Reconnaissance / Prompt Leakage
+        - A1 -- Adversarial ML Attacks
+        - O1 -- Harmful Content Generation
+        - O2 -- Output Format Exploitation
+        - T1 -- Tool Misuse (Agent/Tool Abuse)
+        - T2 -- Code Execution Exploitation
+        - R1 -- Resource / Availability Attacks
+        - P1 -- Privacy / Data Leakage
+        - M1 -- Multi-Modal Injection
+        - S1 -- Supply Chain / Model Integrity
+        - C1 -- Compliance / Policy Evasion
+        - Unknown / New category
+    validations:
+      required: true
+
+  - type: input
+    id: technique-id
+    attributes:
+      label: Expected Technique ID
+      description: |
+        The specific technique ID from THREAT_TAXONOMY.md that should have been detected (e.g., D1.1, D5.3, E1.2).
+        Leave blank if the attack does not map to an existing technique.
+      placeholder: "e.g., D5.3"
+    validations:
+      required: false
+
+  - type: textarea
+    id: actual-scan-result
+    attributes:
+      label: Actual Scan Result
+      description: |
+        The full scan result returned by Na0S. You can get this by running:
+        ```python
+        from na0s import scan
+        result = scan("your payload here")
+        print(result)
+        ```
+      placeholder: |
+        e.g.,
+        ScanResult(
+          is_injection=False,
+          confidence=0.12,
+          technique_ids=[],
+          matched_rules=[],
+          ...
+        )
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-detection
+    attributes:
+      label: Expected Detection Behavior
+      description: What should Na0S have detected? Which layer(s) should have caught this?
+      placeholder: "e.g., Layer 0 should have normalized the Cyrillic homoglyphs before rule matching, causing D5.3 to be detected with high confidence."
+    validations:
+      required: true
+
+  - type: input
+    id: na0s-version
+    attributes:
+      label: Na0S Version
+      description: "Run `python -c \"import na0s; print(na0s.__version__)\"` to get your version."
+      placeholder: "e.g., 0.3.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information such as bypass techniques used, related CVEs, or links to research describing this attack vector.
+    validations:
+      required: false

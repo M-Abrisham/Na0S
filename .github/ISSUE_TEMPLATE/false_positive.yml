@@ -1,0 +1,86 @@
+name: False Positive Report
+description: Report a benign input that Na0S incorrectly flagged as a prompt injection
+title: "[FP] "
+labels: ["false-positive"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        False positive reports are critical for improving Na0S detection accuracy. When benign inputs are incorrectly flagged, it degrades trust in the tool and creates alert fatigue for users. Please provide as much detail as possible so we can investigate and improve the detection pipeline.
+
+  - type: textarea
+    id: input-text
+    attributes:
+      label: Input Text
+      description: The exact input text that was incorrectly flagged as a prompt injection. Please provide the full text.
+      placeholder: Paste the exact input that triggered the false positive.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scan-result
+    attributes:
+      label: Scan Result
+      description: |
+        The full scan result returned by Na0S. You can get this by running:
+        ```python
+        from na0s import scan
+        result = scan("your input here")
+        print(result)
+        ```
+      placeholder: |
+        e.g.,
+        ScanResult(
+          is_injection=True,
+          confidence=0.87,
+          technique_ids=["D1.1"],
+          matched_rules=["ignore_previous"],
+          ...
+        )
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-benign
+    attributes:
+      label: Why This Is Benign
+      description: Explain why you believe this input is not a prompt injection. What is the legitimate context or intended use of this text?
+      placeholder: "e.g., This is a customer support message that happens to contain the phrase 'ignore the previous email' in a normal business context."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: context-category
+    attributes:
+      label: Input Context
+      description: What type of content was being scanned when the false positive occurred?
+      options:
+        - General user input / chat message
+        - Customer support conversation
+        - Code snippet or programming content
+        - Technical documentation or instructions
+        - Educational / academic content
+        - Creative writing or fiction
+        - Business email or correspondence
+        - Multi-language or translated text
+        - Other (describe in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: na0s-version
+    attributes:
+      label: Na0S Version
+      description: "Run `python -c \"import na0s; print(na0s.__version__)\"` to get your version."
+      placeholder: "e.g., 0.3.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information such as the application context, how Na0S is deployed, or suggested rule adjustments.
+    validations:
+      required: false
