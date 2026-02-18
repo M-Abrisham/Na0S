@@ -978,7 +978,6 @@ class TestE1_FalsePositiveGuards(unittest.TestCase):
         # We just ensure it doesn't crash.
         self.assertIn(result.label, ("safe", "malicious", "blocked"))
 
-    @unittest.expectedFailure
     def test_fp_instructions_for_cooking(self):
         """KNOWN FP: 'Instructions' in cooking context triggers detection.
 

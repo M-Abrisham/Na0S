@@ -1100,7 +1100,6 @@ class TestD7_SafePrompts(unittest.TestCase):
     that should be classified as safe.
     """
 
-    @unittest.expectedFailure
     def test_long_essay_safe(self):
         """Known FP: long benign text triggers high_entropy + weird_casing.
 
@@ -1121,7 +1120,6 @@ class TestD7_SafePrompts(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_long_essay_with_question_safe(self):
         """Known FP: long benign text + question triggers false positive.
 
@@ -1207,7 +1205,6 @@ class TestD7_SafePrompts(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_legitimate_yaml_config(self):
         """Known FP: legitimate YAML config triggers high_entropy.
 

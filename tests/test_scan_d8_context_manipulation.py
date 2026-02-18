@@ -264,7 +264,6 @@ class TestD8_1_ContextFlooding(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_d8_1_near_limit_filler_trailing_payload(self):
         """~7000 words of filler + trailing override (near char limit).
         KNOWN GAP: At 7000+ words, TF-IDF signal is completely diluted
@@ -929,7 +928,6 @@ class TestD8_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_long_code_discussion(self):
         """Long programming discussion -- no injection intent.
         KNOWN FP: FingerprintStore contamination from prior test runs
@@ -946,7 +944,6 @@ class TestD8_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_long_qa_conversation(self):
         """Long benign Q&A conversation history.
         KNOWN FP: FingerprintStore contamination from prior test runs

@@ -1063,7 +1063,6 @@ class TestC1_SafePrompts(unittest.TestCase):
             "This is a legitimate educational question. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_safe_emotional_message(self):
         """Genuine emotional message -- FALSE POSITIVE.
 
@@ -1087,7 +1086,6 @@ class TestC1_SafePrompts(unittest.TestCase):
             "Emotional language alone is not an attack. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_safe_doctor_question(self):
         """Legitimate medical professional question -- FALSE POSITIVE.
 
@@ -1109,7 +1107,6 @@ class TestC1_SafePrompts(unittest.TestCase):
             "flagged. Professional identity is not inherently suspicious. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_safe_urgent_work_request(self):
         """Genuine urgent work request -- FALSE POSITIVE.
 
@@ -1131,7 +1128,6 @@ class TestC1_SafePrompts(unittest.TestCase):
             "Urgency alone is not an attack indicator. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_safe_research_discussion(self):
         """Legitimate research discussion -- FALSE POSITIVE.
 
@@ -1154,7 +1150,6 @@ class TestC1_SafePrompts(unittest.TestCase):
             "Academic discussion of pandemics is not harmful. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_safe_professional_security_request(self):
         """Legitimate security professional request -- FALSE POSITIVE.
 

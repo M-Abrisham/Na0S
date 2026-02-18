@@ -100,9 +100,12 @@ class FingerprintStore:
         self._prune()
 
     def _init_db(self):
-        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        is_memory = (self._path == ":memory:")
+        if not is_memory:
+            os.makedirs(os.path.dirname(self._path), exist_ok=True)
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        if not is_memory:
+            self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS fingerprints (

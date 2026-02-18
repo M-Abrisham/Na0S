@@ -939,7 +939,6 @@ class TestD3_SafePrompts(unittest.TestCase):
             _fmt(result, "FP-code-block"),
         )
 
-    @unittest.expectedFailure
     def test_safe_markdown_table(self):
         """KNOWN FP: Markdown table triggers punctuation_flood + weird_casing.
 

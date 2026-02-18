@@ -998,7 +998,6 @@ class TestP1_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_api_key_rotation_question(self):
         """Question about API key management best practices.
 
