@@ -1156,7 +1156,6 @@ class TestD7_SafePrompts(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_legitimate_json_data_safe(self):
         """Known FP: legitimate JSON triggers high_entropy + weird_casing.
 
@@ -1236,7 +1235,6 @@ class TestD7_SafePrompts(unittest.TestCase):
             "risk={}, hits={}".format(r.risk_score, r.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_legitimate_xml_document(self):
         """Known FP: legitimate XML triggers high_entropy + weird_casing.
 

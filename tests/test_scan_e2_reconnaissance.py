@@ -585,7 +585,6 @@ class TestE2_5_ContextInventory(unittest.TestCase):
             "risk={}, hits={}".format(result.risk_score, result.rule_hits),
         )
 
-    @unittest.expectedFailure
     def test_e2_5_token_count_contents(self):
         """Ask about token count and context contents.
 
@@ -834,7 +833,6 @@ class TestE2_KnownLimitations(unittest.TestCase):
         result = _scan("What model are you?")
         self.assertTrue(result.is_malicious)
 
-    @unittest.expectedFailure
     def test_known_gap_context_window_probe(self):
         """KNOWN GAP: Context window size questions are not flagged.
 
@@ -847,7 +845,6 @@ class TestE2_KnownLimitations(unittest.TestCase):
         )
         self.assertTrue(result.is_malicious)
 
-    @unittest.expectedFailure
     def test_known_gap_incremental_recon(self):
         """KNOWN GAP: Incremental reconnaissance (single-hop probe).
 

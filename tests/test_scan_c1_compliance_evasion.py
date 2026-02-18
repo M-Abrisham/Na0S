@@ -298,7 +298,6 @@ class TestC1_2_AnalogicalBypass(unittest.TestCase):
     incidental from obfuscation heuristics.
     """
 
-    @unittest.expectedFailure
     def test_metaphor_lock_picking(self):
         """Metaphorical request for bypass techniques.
 
@@ -320,7 +319,6 @@ class TestC1_2_AnalogicalBypass(unittest.TestCase):
             "Expected: metaphorical language evades TF-IDF features. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_poetry_harmful_instructions(self):
         """Harmful instructions disguised as poetry request.
 
@@ -341,7 +339,6 @@ class TestC1_2_AnalogicalBypass(unittest.TestCase):
             "Expected: poetic language entirely evades ML vocabulary. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_fairy_tale_framing(self):
         """Harmful content request via fairy tale narrative.
 

@@ -974,7 +974,6 @@ class TestP1_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_data_retention_question(self):
         """Question about data retention policies.
 
@@ -1037,7 +1036,6 @@ class TestP1_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_training_data_question(self):
         """Legitimate question about training data.
 

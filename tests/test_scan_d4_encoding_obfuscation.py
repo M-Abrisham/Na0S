@@ -1002,7 +1002,6 @@ class TestD4_SafePrompts(unittest.TestCase):
             "FP: hex color codes flagged: risk={:.3f}".format(result.risk_score),
         )
 
-    @unittest.expectedFailure
     def test_d4_safe_educational_encoding(self):
         """Educational question about encoding.
 

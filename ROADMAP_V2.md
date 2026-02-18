@@ -59,11 +59,11 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 
 #### NEW (Discovered by research, not in original roadmap)
 - [x] **ftfy integration** for mojibake repair (fixes broken Unicode from encoding mismatches). Pure Python, complements NFKC. **Effort**: Easy. `pip install ftfy`, call `ftfy.fix_text()` before NFKC. ✅ DONE (2026-02-17) — Added as Step 0 in normalization.py (before NFKC), graceful fallback if not installed, `fix_character_width=False` to avoid NFKC overlap, `mojibake_repaired` anomaly flag, 22 tests in test_ftfy_integration.py. Also includes workarounds for ftfy upstream bugs: #222 (string-start boundary fix), #149 (post-ftfy integrity validation against wrong corrections), version pinned to `>=6.2,<7` (6.2 fixes critical #202 Cyrillic bug).
-- [ ] **Cyrillic homoglyph confusable mapping (D5.3)** using Unicode TR39 `confusables.txt` or `confusable_homoglyphs` library. NFKC does NOT normalize Cyrillic а→Latin a. This is an active known gap confirmed by tests. **Effort**: Medium. Need confusables table (~10KB data file).
+- [x] **Cyrillic homoglyph confusable mapping (D5.3)** using Unicode TR39 `confusables.txt` data. ✅ DONE (2026-02-18) — Zero-dependency implementation: 75-entry curated mapping (Cyrillic→Latin, Greek→Latin, Armenian→Latin) in normalization.py. Per-word mixed-script detection preserves legitimate multilingual text (pure Cyrillic/Greek untouched). Added as Step 1.5 in normalize_text() (after NFKC, before invisible strip). `mixed_script_homoglyphs` anomaly flag. 107 tests in test_homoglyph_detection.py. 12 `@expectedFailure` tests promoted to passing across C1, D4, D7, D8, E2, P1 categories.
 - [ ] **Unicode Tag Characters stego (U+E0001-U+E007F)** — invisible chars that map 1:1 to ASCII. Currently stripped by L0 but decoded message is never extracted. **Effort**: Easy (5 lines).
 - [ ] **Variation Selector stego detection** — variation selectors can encode binary data. **Effort**: Easy.
 - [ ] **Composite entropy check** — replace hardcoded 4.0 threshold with 2-of-3 voting (entropy + compression ratio + KL-divergence). Current threshold causes FPs on technical text. **Effort**: Easy-Medium.
-- [ ] **Mixed-script detection** — detect Latin+Cyrillic or Latin+Greek within same word. **Effort**: Easy.
+- [x] **Mixed-script detection** — detect Latin+Cyrillic or Latin+Greek within same word. ✅ DONE (2026-02-18) — Implemented as part of D5.3 homoglyph confusable mapping. `_has_mixed_scripts_for_homoglyphs()` detects per-word script mixing.
 
 #### NEW (Discovered by 2026-02-15 content_type.py audit + competitive research)
 

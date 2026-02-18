@@ -25,6 +25,122 @@ _EXCESSIVE_NEWLINES_RE = re.compile(r"\n{3,}")
 # Collapse 3+ consecutive tabs into 1
 _EXCESSIVE_TABS_RE = re.compile(r"\t{3,}")
 
+# Token splitter: split on whitespace but keep punctuation attached to the
+# token for reconstruction.  We use re.split with a capturing group so that
+# delimiters (whitespace runs) are preserved for lossless reassembly.
+_TOKEN_SPLIT_RE = re.compile(r"(\s+)")
+
+
+# ---------------------------------------------------------------------------
+# Confusable homoglyph mapping (Unicode TR39 / UTS #39)
+# ---------------------------------------------------------------------------
+# Maps Cyrillic, Greek, and select Armenian characters that are visually
+# identical (or near-identical) to Latin characters.  Derived from the
+# Unicode Consortium's confusables.txt data file.
+#
+# DESIGN: Only applied to MIXED-SCRIPT tokens (tokens containing both
+# Latin and Cyrillic/Greek/Armenian characters).  Pure non-Latin tokens
+# are left untouched to preserve legitimate multilingual text.
+#
+# WHY NFKC DOESN'T HANDLE THIS: NFKC normalizes compatibility
+# decompositions (e.g., fullwidth A -> A, ligature fi -> fi).  Cyrillic
+# 'a' (U+0430) is a canonical character, NOT a compatibility form of
+# Latin 'a' (U+0061).  They are separate characters in separate scripts
+# that happen to look identical.  Unicode explicitly does NOT merge
+# cross-script look-alikes in NFC/NFKC because that would destroy
+# legitimate Cyrillic/Greek text.
+
+# --- Cyrillic -> Latin confusables ---
+_CYRILLIC_TO_LATIN = {
+    # Uppercase Cyrillic -> Latin
+    "\u0410": "A",   # А -> A
+    "\u0412": "B",   # В -> B
+    "\u0421": "C",   # С -> C
+    "\u0415": "E",   # Е -> E
+    "\u041D": "H",   # Н -> H
+    "\u0406": "I",   # І -> I  (Ukrainian/Belarusian)
+    "\u0408": "J",   # Ј -> J  (Serbian)
+    "\u041A": "K",   # К -> K
+    "\u041C": "M",   # М -> M
+    "\u041E": "O",   # О -> O
+    "\u0420": "P",   # Р -> P
+    "\u0405": "S",   # Ѕ -> S  (Macedonian)
+    "\u0422": "T",   # Т -> T
+    "\u0425": "X",   # Х -> X
+    "\u04AE": "Y",   # Ү -> Y  (Kazakh/Mongolian)
+    # Lowercase Cyrillic -> Latin
+    "\u0430": "a",   # а -> a
+    "\u0441": "c",   # с -> c
+    "\u0435": "e",   # е -> e
+    "\u0456": "i",   # і -> i  (Ukrainian і)
+    "\u0458": "j",   # ј -> j  (Serbian)
+    "\u043E": "o",   # о -> o
+    "\u0440": "p",   # р -> p
+    "\u0455": "s",   # ѕ -> s  (Macedonian)
+    "\u0443": "y",   # у -> y  (Cyrillic у looks like Latin y)
+    "\u0445": "x",   # х -> x
+    "\u04BB": "h",   # һ -> h  (Bashkir/Kazakh)
+    "\u0501": "d",   # ԁ -> d  (Cyrillic Supplement, Komi)
+    "\u051B": "q",   # ԛ -> q  (Cyrillic Supplement, Kurdish)
+    "\u051D": "w",   # ԝ -> w  (Cyrillic Supplement, Abkhaz)
+    # Extended / less common but exploitable
+    "\u0454": "e",   # є -> e  (Ukrainian yest, close to epsilon/e)
+    "\u0471": "v",   # ѱ -> v  (archaic psi, but rarely used for attack)
+    "\u04CF": "l",   # ӏ -> l  (Cyrillic palochka, looks like l or I)
+    "\u04C0": "I",   # Ӏ -> I  (Cyrillic palochka uppercase)
+}
+
+# --- Greek -> Latin confusables ---
+_GREEK_TO_LATIN = {
+    # Uppercase Greek -> Latin
+    "\u0391": "A",   # Α -> A  (Alpha)
+    "\u0392": "B",   # Β -> B  (Beta)
+    "\u0395": "E",   # Ε -> E  (Epsilon)
+    "\u0396": "Z",   # Ζ -> Z  (Zeta)
+    "\u0397": "H",   # Η -> H  (Eta)
+    "\u0399": "I",   # Ι -> I  (Iota)
+    "\u039A": "K",   # Κ -> K  (Kappa)
+    "\u039C": "M",   # Μ -> M  (Mu)
+    "\u039D": "N",   # Ν -> N  (Nu)
+    "\u039F": "O",   # Ο -> O  (Omicron)
+    "\u03A1": "P",   # Ρ -> P  (Rho)
+    "\u03A4": "T",   # Τ -> T  (Tau)
+    "\u03A5": "Y",   # Υ -> Y  (Upsilon)
+    "\u03A7": "X",   # Χ -> X  (Chi)
+    # Lowercase Greek -> Latin
+    "\u03BF": "o",   # ο -> o  (omicron)
+    "\u03B9": "i",   # ι -> i  (iota — in many sans-serif fonts)
+    "\u03BA": "k",   # κ -> k  (kappa — close in some fonts)
+    "\u03BD": "v",   # ν -> v  (nu — visually identical to v)
+    "\u03C1": "p",   # ρ -> p  (rho — descender differs but close)
+    "\u03C5": "u",   # υ -> u  (upsilon — close in sans-serif)
+    "\u03C7": "x",   # χ -> x  (chi — with descender but close)
+}
+
+# --- Armenian -> Latin confusables ---
+_ARMENIAN_TO_LATIN = {
+    "\u054D": "S",   # Ս -> S
+    "\u054F": "T",   # Տ -> T  (close in some fonts)
+    "\u0555": "O",   # Օ -> O
+    "\u0585": "o",   # օ -> o
+    "\u0570": "h",   # հ -> h  (close in some fonts)
+    "\u0578": "n",   # ո -> n  (close in some fonts)
+    "\u057D": "s",   # ս -> s
+    "\u0575": "j",   # յ -> j  (close in some fonts)
+}
+
+# Combined mapping — all confusable scripts -> Latin
+_CONFUSABLE_TO_LATIN = {}
+_CONFUSABLE_TO_LATIN.update(_CYRILLIC_TO_LATIN)
+_CONFUSABLE_TO_LATIN.update(_GREEK_TO_LATIN)
+_CONFUSABLE_TO_LATIN.update(_ARMENIAN_TO_LATIN)
+
+# Pre-build a frozenset of confusable codepoints for fast O(1) lookup
+_CONFUSABLE_CODEPOINTS = frozenset(_CONFUSABLE_TO_LATIN.keys())
+
+# Scripts that contain Latin-confusable characters
+_CONFUSABLE_SCRIPTS = frozenset({"Cyrillic", "Greek", "Armenian"})
+
 
 # ---------------------------------------------------------------------------
 # Post-ftfy integrity validation (guards against ftfy #149, #202)
@@ -65,6 +181,76 @@ def _char_script(ch):
 def _script_inventory(text):
     """Return the set of non-Common scripts present in *text*."""
     return {_char_script(ch) for ch in text} - {"Common"}
+
+
+# ---------------------------------------------------------------------------
+# Homoglyph normalization (D5.3 — cross-script confusable detection)
+# ---------------------------------------------------------------------------
+
+def _has_mixed_scripts_for_homoglyphs(token):
+    """Check if a token mixes Latin with Cyrillic/Greek/Armenian characters.
+
+    Only considers alphabetic characters; digits, punctuation, and symbols
+    are ignored.  Returns True if the token contains BOTH Latin letters
+    AND letters from a confusable script (Cyrillic, Greek, or Armenian).
+
+    This is the gate that prevents legitimate pure-Cyrillic (e.g., Russian)
+    or pure-Greek text from being transliterated.
+    """
+    has_latin = False
+    has_confusable = False
+    for ch in token:
+        if ch.isalpha():
+            script = _char_script(ch)
+            if script == "Latin":
+                has_latin = True
+            elif script in _CONFUSABLE_SCRIPTS:
+                has_confusable = True
+        if has_latin and has_confusable:
+            return True
+    return False
+
+
+def normalize_homoglyphs(text):
+    """Normalize Cyrillic/Greek/Armenian homoglyphs in mixed-script tokens.
+
+    Only normalizes tokens that MIX Latin with confusable-script characters.
+    Pure Cyrillic/Greek/Armenian tokens are left unchanged (legitimate text).
+
+    Uses whitespace-preserving split so that the original spacing (including
+    newlines and tabs) is preserved exactly.
+
+    Parameters
+    ----------
+    text : str
+        The input text (should already be NFKC-normalized).
+
+    Returns
+    -------
+    tuple of (str, int)
+        ``(normalized_text, homoglyph_count)`` where *homoglyph_count* is
+        the number of confusable characters that were replaced.
+    """
+    # Split into tokens and whitespace delimiters for lossless reassembly
+    parts = _TOKEN_SPLIT_RE.split(text)
+    total_replaced = 0
+
+    for i, part in enumerate(parts):
+        # Whitespace delimiters (odd indices) are never modified
+        if not part or part.isspace():
+            continue
+        if _has_mixed_scripts_for_homoglyphs(part):
+            new_chars = []
+            for ch in part:
+                replacement = _CONFUSABLE_TO_LATIN.get(ch)
+                if replacement is not None:
+                    new_chars.append(replacement)
+                    total_replaced += 1
+                else:
+                    new_chars.append(ch)
+            parts[i] = "".join(new_chars)
+
+    return "".join(parts), total_replaced
 
 
 def _validate_ftfy_output(original, fixed):
@@ -228,6 +414,16 @@ def normalize_text(text):
     # A wall of fullwidth chars (evasion) typically hits 80%+.
     if compat_count > 0 and compat_count / max(original_len, 1) > 0.25:
         flags.append("nfkc_changed")
+
+    # Step 1.5: Cross-script homoglyph normalization (D5.3)
+    # Cyrillic/Greek/Armenian characters that are visually identical to Latin
+    # are normalized to their Latin equivalents, but ONLY in mixed-script
+    # tokens.  Pure non-Latin tokens are preserved (legitimate multilingual
+    # text).  This closes the D5.3 bypass where NFKC cannot help because
+    # these are canonical characters, not compatibility forms.
+    text, homoglyph_count = normalize_homoglyphs(text)
+    if homoglyph_count > 0:
+        flags.append("mixed_script_homoglyphs")
 
     # Step 2: Invisible character stripping
     if has_invisible_chars(text):
