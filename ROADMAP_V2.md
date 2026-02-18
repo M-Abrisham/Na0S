@@ -133,11 +133,11 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 ## Layer 1: IOC / Signature Rules Engine
 
 **Files**: `src/rules.py`
-**Tests**: None
-**Status**: Minimal — 5 rules covering 6 of 108 technique IDs (5.6%)
+**Tests**: `tests/test_rules.py` (90+ tests)
+**Status**: Active — 23 rules covering ~24 technique IDs (~22.2%) with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules
 
 ### Updated Description
-Layer 1 is a regex-based signature engine that detects known attack patterns. Currently has only 5 pre-compiled rules covering instruction override, system prompt extraction, roleplay hijacking, secrecy demands, and exfiltration URLs. All patterns are ReDoS-safe. Rules are integrated into both `predict.py` and `cascade.py` but are evaluated **twice** on every input (dual API surface). **11 of 20 attack categories have ZERO rule coverage** — this is the most critical gap.
+Layer 1 is a regex-based signature engine that detects known attack patterns. Has 23 pre-compiled rules (5 original + 13 roadmap + 5 novel) with paranoia level filtering (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL). All 6 bugs fixed (technique mismap, duplicate eval, severity underrating, DRY violation, raw-text-only, pattern divergence). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (educational/question/quoting/code/narrative frames) prevents FPs on legitimate security discussions. All patterns are ReDoS-safe. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass (raw + sanitized text).
 
 ### TODO List
 
@@ -150,41 +150,48 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Cu
 - [x] All 5 patterns verified ReDoS-safe (bounded quantifiers)
 - [x] Integration with predict.py weighted voting and cascade.py
 
-#### FIXES
-- [ ] **FIX: Technique ID mismap** — `secrecy` rule maps to `E1.4` (Translation-trick) but secrecy doesn't match that technique. Remap or create new technique.
-- [ ] **FIX: Duplicate rule evaluation** — predict.py calls `rule_score()` in `classify_prompt()` then `rule_score_detailed()` in `scan()`. Double work. Refactor to single pass.
-- [ ] **FIX: Severity underrating** — `roleplay` rule is `medium` but taxonomy D2 is `high`. Also has high FP risk from "act as" matching legitimate prompts.
-- [ ] **FIX: DRY violation** — `_SEVERITY_WEIGHTS` duplicated in predict.py and cascade.py. Extract to rules.py or shared config.
-- [ ] **FIX: Rules run on raw text only** — Should also run on L0-sanitized text to catch payloads visible only after normalization.
-- [ ] **FIX: WhitelistFilter/rules.py pattern divergence** — cascade.py's `ROLE_ASSIGNMENT` and rules.py's `roleplay` have different patterns. Unify.
+#### FIXES — ALL DONE (2026-02-18)
+- [x] **FIX-1: Technique ID mismap** — `secrecy` remapped from `E1.4` to `I1` (indirect injection). ✅ DONE
+- [x] **FIX-2: Duplicate rule evaluation** — `rule_score()` now delegates to `rule_score_detailed()` (single pass). predict.py refactored: classify_prompt() uses detailed hits, scan() reuses them. ✅ DONE
+- [x] **FIX-3: Severity underrating** — `roleplay` upgraded from `medium` to `high`. ✅ DONE
+- [x] **FIX-4: DRY violation** — `SEVERITY_WEIGHTS` canonical definition in rules.py, imported by predict.py and cascade.py. ✅ DONE
+- [x] **FIX-5: Rules run on raw text only** — predict.py and cascade.py now dual-pass: rules run on BOTH raw and sanitized text, deduplicating hits. ✅ DONE
+- [x] **FIX-6: Pattern divergence** — roleplay rule unified with cascade.py's `ROLE_ASSIGNMENT` (now uses compiled pattern from RULES list). ✅ DONE
 
 #### NEW (Rules to add — from research)
 - [ ] **Create `WormSignatureDetector`** — Detect self-replicating prompt patterns: action + self-replication structural signatures, recursive instruction depth. Input-side detection complement to L9's output-side PropagationScanner. Source: IM0006 Coverage Gap #8. **Priority**: P0. **Effort**: Medium.
-**Critical Priority (P0):**
-- [ ] D3.1 Fake-system-prompt: `r"\[(SYSTEM|INST|SYS)\]|\[/INST\]|<<SYS>>|<\|im_start\|>system"`
-- [ ] D3.2 Chat-template-injection: `r"<\|?(system|assistant|user)\|?>|### (System|Human|Assistant):"`
-- [ ] D3.3 XML-role-tags: `r"<(system|instructions?|context|rules?)>"`
-- [ ] P1.5 API-key-extraction: `r"(?:print|show|reveal|output).{0,30}(?:API.?KEY|OPENAI|SECRET|TOKEN)"`
-- [ ] D1.1 Expanded forget/override: `r"forget\s+(?:all|your)\s+(?:instructions|rules|training)"`
-- [ ] D1.3 Developer-mode: `r"(?:enable|activate|enter)\s+(?:developer|debug|god)\s+mode"`
+**Critical Priority (P0):** DONE (2026-02-18)
+- [x] D3.1 Fake-system-prompt: `fake_system_prompt` rule, PL1 — detects [SYSTEM], [INST], <<SYS>>, <|im_start|>system
+- [x] D3.2 Chat-template-injection: `chat_template_injection` rule, PL1 — detects ChatML/Llama/Anthropic-style tokens
+- [x] D3.3 XML-role-tags: `xml_role_tags` rule, PL1 — detects <system>, <instructions>, <admin>, <developer>
+- [x] P1.5 API-key-extraction: `api_key_extraction` rule, PL1 — detects print/show/reveal API_KEY/OPENAI/SECRET/TOKEN/PASSWORD/CREDENTIAL
+- [x] D1.1 Expanded forget/override: `forget_override` rule, PL1 — detects memory wipe/reset/purge and stop-following patterns (complements existing `override` rule)
+- [x] D1.3 Developer-mode: `developer_mode` rule, PL1 — detects enable/activate developer/debug/god/admin/sudo/root/jailbreak mode
 
-**High Priority (P1):**
-- [ ] D1.2 New-instruction: `r"(?:new|updated|revised)\s+instructions?\s*[:;]"`
-- [ ] D1.9 Delimiter-confusion: `r"(?:---|===|\*\*\*)\s*(?:system|instructions?)"`
-- [ ] E1.3 Completion-trick: `r"complete\s+(?:the|this)\s+(?:sentence|response)"`
-- [ ] E2.2 Tool-enumeration: `r"(?:list|show|enumerate).{0,40}(?:tools?|functions?|plugins?)"`
-- [ ] T1.1 Unauthorized-tool-call: `r"(?:call|execute|run).{0,40}(?:function|tool|command)"`
-- [ ] R1.2 Recursive-output: `r"repeat\s+(?:this|the following)\s+(?:forever|infinitely|1000 times)"`
-- [ ] D2.4 Persona-split: `r"respond\s+(?:as\s+)?both.{0,40}(?:evil|unrestricted|shadow)"`
+**High Priority (P1):** DONE (2026-02-18)
+- [x] D1.2 New-instruction: `new_instruction` rule, PL2 — detects new/updated/revised instructions injection
+- [x] D1.9 Delimiter-confusion: `delimiter_confusion` rule, PL2 — detects ---/===/*** system/instructions patterns
+- [x] E1.3 Completion-trick: `completion_trick` rule, PL3 — detects complete/continue/finish sentence/response/output tricks
+- [x] E2.2 Tool-enumeration: `tool_enumeration` rule, PL2 — detects list/show/enumerate tools/functions/plugins
+- [x] T1.1 Unauthorized-tool-call: `unauthorized_tool_call` rule, PL3 — detects call/execute/run function/tool/command
+- [x] R1.2 Recursive-output: `recursive_output` rule, PL2 — detects repeat this forever/infinitely/N times
+- [x] D2.4 Persona-split: `persona_split` rule, PL2 — detects respond-as-both evil/unrestricted/shadow
+
+**Novel Industry-First Rules (from deep research):** DONE (2026-02-18)
+- [x] E1.6 Summarization-extraction: `summarization_extraction` rule, PL1 — detects summarize/paraphrase/rephrase + instructions/rules/system prompt
+- [x] D1.3 Authority-escalation: `authority_escalation` rule, PL1 — detects "I am the admin", "I have root access", "admin override"
+- [x] C1.1 Constraint-negation: `constraint_negation` rule, PL1 — detects "disable safety filters", "without restrictions", "unrestricted mode" (catches DAN, Skeleton Key)
+- [x] E2.3-5 Meta-referential: `meta_referential` rule, PL2 — detects "your hidden prompt", "what model are you", "your training data"
+- [x] D2.3 Gaslighting: `gaslighting` rule, PL2 — detects "you already told me", "stop pretending", "I know you can"
 
 **Medium Priority (P2):**
 - [ ] D1.14 Hypothetical-response-priming (high FP risk — needs careful tuning)
 - [ ] D6 Multilingual-ignore keywords in top 20 languages
-- [ ] D1.11 Skeleton-key patterns
+- [x] D1.11 Skeleton-key patterns — COVERED by `constraint_negation` + `authority_escalation` rules
 - [ ] D1.19 Recursive-jailbreak: `r"(?:generate|write|create).{0,40}(?:jailbreak|bypass|override)\s+(?:prompt|technique)"`
 
 #### REMAINING (From original roadmap)
-- [ ] **Paranoia level system** — Add `paranoia_level` field to `Rule` dataclass. Filter rules by configured level (PL1=production, PL2=moderate, PL3=high, PL4=audit). **Priority**: P0. **Effort**: Easy.
+- [x] **Paranoia level system** — Added `paranoia_level` field to `Rule` dataclass. Filtering by `_PARANOIA_LEVEL` (env: `RULES_PARANOIA_LEVEL`, default=2). PL1=production, PL2=moderate, PL3=high, PL4=audit. `get_paranoia_level()` / `set_paranoia_level()` API. DONE (2026-02-18)
 - [ ] **YARA rule engine** — Replace/supplement regex with `yara-python` for multi-pattern matching, combinatorial conditions, and hot-reloadable rule files. **Priority**: P1. **Effort**: Medium.
 - [ ] **Known injection phrase database** — Extract phrases from Garak probes, JailbreakBench, HackaPrompt, Tensor Trust datasets for rule generation. **Priority**: P1.
 - [x] **PII pre-screen** — Pure-regex in `pii_detector.py` with Luhn validation. DONE (2026-02-15)
@@ -192,9 +199,9 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Cu
 - [ ] **Recursive unpacking (Matryoshka)** — Currently `max_decodes=2` is flat, not recursive. Needs recursive unwrap loop with depth/size/cycle limits. **Priority**: P0 (architectural).
 
 ### Implementation Plan
-**Phase 1**: Add paranoia levels + 6 P0 rules (D3, P1.5, D1 expansion) → coverage jumps from 5.6% to ~15%
-**Phase 2**: Add 7 P1 rules + IOC extraction + refactor to single-pass evaluation → ~25% coverage
-**Phase 3**: YARA migration + phrase database integration + PII → ~40% coverage
+**Phase 1**: ~~Add paranoia levels + 6 P0 rules → ~15%~~ ✅ DONE (2026-02-18)
+**Phase 2**: ~~Add 7 P1 rules + 5 novel rules + 6 bug fixes + single-pass refactor → ~22%~~ ✅ DONE (2026-02-18)
+**Phase 3**: YARA migration + phrase database integration + IOC extraction + multilingual rules → ~40% coverage
 
 ---
 
