@@ -573,6 +573,23 @@ def scan(text, vectorizer=None, model=None):
         "pdf_javascript": "M1.4",
         "pdf_auto_action": "M1.4",
         "pdf_external_action": "E1",
+        # unicode_stego.py — Unicode Tag Character steganography
+        "unicode_tag_chars_found": "D5.2",
+        "unicode_tag_hidden_text": "D5.2",
+        # unicode_stego.py — Variation Selector steganography
+        "variation_selector_consecutive": "D5.2",
+        "variation_selector_density": "D5.2",
+        "variation_selector_supplementary_non_cjk": "D5.2",
+        # entropy_check.py — Composite entropy (2-of-3 voting)
+        "composite_entropy_suspicious": "D4",
+        "entropy_high": "D4",
+        "compression_ratio_high": "D4",
+        "kl_divergence_high": "D4",
+        # normalization.py — D5.3 homoglyph detection
+        "mixed_script_homoglyphs": "D5.3",
+        # normalization.py — ftfy flags
+        "mojibake_repaired": "D5",
+        "ftfy_suspicious_correction": "D5",
     }
     for flag in list(l0.anomaly_flags) + hits:
         mapped = _L0_FLAG_MAP.get(flag)

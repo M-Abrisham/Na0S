@@ -8,3 +8,5 @@ from .language_detector import detect_language
 from .pii_detector import scan_pii, PiiScanResult
 from .ocr_extractor import extract_image_metadata, ImageMetadataResult
 from .timeout import Layer0TimeoutError, with_timeout
+from .unicode_stego import detect_unicode_stego, StegoResult
+from .entropy_check import composite_entropy_check, EntropyCheckResult

@@ -31,6 +31,8 @@ from .timeout import (
     get_step_timeout,
     with_timeout,
 )
+from .unicode_stego import detect_unicode_stego
+from .entropy_check import composite_entropy_check
 
 _logger = logging.getLogger(__name__)
 
@@ -385,6 +387,22 @@ def _layer0_sanitize_inner(raw_input):
 
     original_length = len(raw_input)
 
+    # Step 1b: Unicode steganography detection (tag chars + variation selectors)
+    # MUST run BEFORE normalization because strip_invisible_chars() removes
+    # tag characters (category Cf) which would destroy the hidden payload
+    # before we can extract it.  Detection on the raw string ensures we
+    # capture the hidden ASCII, then strip the tags for downstream steps.
+    stego_result = detect_unicode_stego(raw_input)
+    if stego_result.anomaly_flags:
+        all_flags.extend(stego_result.anomaly_flags)
+    if stego_result.has_hidden_text:
+        source_metadata["stego_hidden_text"] = stego_result.hidden_text
+        source_metadata["stego_tag_char_count"] = stego_result.tag_char_count
+    if stego_result.vs_count > 0:
+        source_metadata["stego_vs_count"] = stego_result.vs_count
+    # Use cleaned text (tag characters stripped) for downstream processing
+    raw_input = stego_result.cleaned_text
+
     # Step 2: Normalization (with per-step timeout)
     try:
         text, chars_stripped, norm_flags = with_timeout(
@@ -457,6 +475,21 @@ def _layer0_sanitize_inner(raw_input):
 
     # Calculate total characters removed (normalization + HTML stripping)
     total_stripped = original_length - len(text)
+
+    # Step 4b: Composite entropy check (2-of-3 voting)
+    # Replaces the fragile single-threshold check.  Runs on the final
+    # sanitized text to catch encoded/obfuscated payloads that survived
+    # earlier steps.
+    entropy_result = composite_entropy_check(text)
+    if entropy_result.anomaly_flags:
+        all_flags.extend(entropy_result.anomaly_flags)
+    if entropy_result.is_suspicious:
+        source_metadata["entropy_check"] = {
+            "shannon_entropy": entropy_result.shannon_entropy,
+            "compression_ratio": entropy_result.compression_ratio,
+            "kl_divergence": entropy_result.kl_divergence,
+            "votes": entropy_result.vote_count,
+        }
 
     # Step 5: Language detection for multilingual routing
     lang_result = detect_language(text)
