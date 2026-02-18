@@ -8,7 +8,30 @@ import time
 
 import tiktoken
 
-_ENCODER = tiktoken.get_encoding("cl100k_base")
+_ENCODER = None
+_ENCODER_LOCK = threading.Lock()
+
+
+def _get_encoder():
+    """Lazy-load the tiktoken encoder on first use.
+
+    tiktoken.get_encoding() downloads the BPE file from the network
+    on first call if it's not cached locally.  Doing this at import
+    time breaks the package in offline environments (Docker, CI,
+    air-gapped servers).  Lazy loading defers the network call to
+    first actual use and allows graceful fallback.
+    """
+    global _ENCODER
+    if _ENCODER is not None:
+        return _ENCODER
+    with _ENCODER_LOCK:
+        if _ENCODER is not None:
+            return _ENCODER
+        try:
+            _ENCODER = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            return None
+    return _ENCODER
 
 # --- Ratio thresholds ---
 # Start permissive — tighten based on real attacks, not guesses.
@@ -56,12 +79,27 @@ def _compute_fingerprint(text):
                          (catches identical token patterns)
     Plus numeric features: token_count, char_count, ratio.
     """
-    tokens = _ENCODER.encode(text)
-    token_bytes = ",".join(str(t) for t in tokens).encode("utf-8")
+    encoder = _get_encoder()
 
     # Normalized form: lowercase, strip punctuation, collapse whitespace
     norm = _NORMALIZE_RE.sub("", text.lower())
     norm = " ".join(norm.split())
+
+    if encoder is None:
+        # Offline fallback: word count as rough proxy for token count.
+        # Loses token_hash but keeps the system functional.
+        token_count = len(text.split())
+        return {
+            "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "normalized_hash": hashlib.sha256(norm.encode("utf-8")).hexdigest(),
+            "token_hash": "",
+            "token_count": token_count,
+            "char_count": len(text),
+            "ratio": round(token_count / max(len(text), 1), 4),
+        }
+
+    tokens = encoder.encode(text)
+    token_bytes = ",".join(str(t) for t in tokens).encode("utf-8")
 
     return {
         "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
@@ -326,6 +364,11 @@ def check_tokenization_anomaly(text):
     store_flags = store.check(fp)
     flags.extend(store_flags)
 
+    # Checks 2 and 3 require the tokenizer — skip if offline
+    encoder = _get_encoder()
+    if encoder is None:
+        return flags, fp["ratio"], fp
+
     # Check 2: global ratio (skip for CJK/emoji — they naturally tokenize high)
     if fp["ratio"] >= GLOBAL_RATIO_THRESHOLD and not _is_high_token_script(text):
         flags.append("tokenization_spike")
@@ -335,7 +378,7 @@ def check_tokenization_anomaly(text):
     if char_count > WINDOW_SIZE and not _is_high_token_script(text):
         for start in range(0, char_count - WINDOW_SIZE + 1, WINDOW_SIZE):
             window = text[start : start + WINDOW_SIZE]
-            w_tokens = len(_ENCODER.encode(window))
+            w_tokens = len(encoder.encode(window))
             w_ratio = w_tokens / len(window)
             if w_ratio >= WINDOW_RATIO_THRESHOLD:
                 flags.append("tokenization_spike_local")
