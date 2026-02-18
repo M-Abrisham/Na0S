@@ -276,7 +276,8 @@ def _run_with_timeout(fn, timeout_ms: int):
 
     Returns the result of *fn* or raises ``RegexTimeoutError``.
     """
-    if _HAS_SIGALRM:
+    import threading
+    if _HAS_SIGALRM and threading.current_thread() is threading.main_thread():
         with _AlarmTimeout(timeout_ms):
             return fn()
     else:

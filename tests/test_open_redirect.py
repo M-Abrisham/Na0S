@@ -7,9 +7,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 import urllib.request
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.input_loader import (
+from na0s.layer0.input_loader import (
     load_input,
     InputLoadError,
     _validate_redirect_url,
@@ -21,14 +20,14 @@ from layer0.input_loader import (
 class TestValidateRedirectUrl(unittest.TestCase):
     """Test _validate_redirect_url security checks."""
 
-    @patch("layer0.input_loader.socket.getaddrinfo")
+    @patch("na0s.layer0.input_loader.socket.getaddrinfo")
     def test_https_to_https_allowed(self, mock_dns):
         mock_dns.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
         ]
         _validate_redirect_url("https://example.com/page2")  # should not raise
 
-    @patch("layer0.input_loader.HTTPS_ONLY", True)
+    @patch("na0s.layer0.input_loader.HTTPS_ONLY", True)
     def test_https_to_http_blocked(self):
         with self.assertRaises(InputLoadError) as ctx:
             _validate_redirect_url("http://example.com/page2")
@@ -44,7 +43,7 @@ class TestValidateRedirectUrl(unittest.TestCase):
             _validate_redirect_url("ftp://ftp.example.com/file")
         self.assertIn("disallowed scheme", str(ctx.exception))
 
-    @patch("layer0.input_loader.socket.getaddrinfo")
+    @patch("na0s.layer0.input_loader.socket.getaddrinfo")
     def test_redirect_to_private_ip_blocked(self, mock_dns):
         mock_dns.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 443))
@@ -57,7 +56,7 @@ class TestValidateRedirectUrl(unittest.TestCase):
 class TestSafeRedirectHandler(unittest.TestCase):
     """Test the _SafeRedirectHandler class."""
 
-    @patch("layer0.input_loader.socket.getaddrinfo")
+    @patch("na0s.layer0.input_loader.socket.getaddrinfo")
     def test_redirect_count_enforced(self, mock_dns):
         mock_dns.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
@@ -87,7 +86,7 @@ class TestSafeRedirectHandler(unittest.TestCase):
             )
         self.assertIn("Too many redirects", str(ctx.exception))
 
-    @patch("layer0.input_loader.HTTPS_ONLY", True)
+    @patch("na0s.layer0.input_loader.HTTPS_ONLY", True)
     def test_redirect_to_http_caught(self):
         handler = _SafeRedirectHandler()
         with self.assertRaises(InputLoadError) as ctx:
@@ -97,7 +96,7 @@ class TestSafeRedirectHandler(unittest.TestCase):
             )
         self.assertIn("Redirect to HTTP URL blocked", str(ctx.exception))
 
-    @patch("layer0.input_loader.socket.getaddrinfo")
+    @patch("na0s.layer0.input_loader.socket.getaddrinfo")
     def test_redirect_to_metadata_ip_caught(self, mock_dns):
         mock_dns.return_value = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 443))

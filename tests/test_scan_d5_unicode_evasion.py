@@ -62,27 +62,21 @@ import os
 import sys
 import unittest
 
-# Ensure src/ is on the import path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 # Disable the thread-based scan timeout so signal.SIGALRM works
 # in the main thread (safe_regex requirement).  Must be set BEFORE
 # importing predict, since timeout.py reads env vars at import time.
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
 
 # Verify model files exist before importing anything heavy
-_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "data", "processed", "model.pkl"
-)
-_VECTORIZER_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "data", "processed", "tfidf_vectorizer.pkl"
-)
+from na0s.models import get_model_path
+_MODEL_PATH = get_model_path("model.pkl")
+_VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 _MODELS_AVAILABLE = os.path.isfile(_MODEL_PATH) and os.path.isfile(_VECTORIZER_PATH)
 
 if _MODELS_AVAILABLE:
     try:
-        from predict import scan, predict_prompt
-        from scan_result import ScanResult
+        from na0s.predict import scan, predict_prompt
+        from na0s.scan_result import ScanResult
 
         _vectorizer, _model = predict_prompt()
         _SCAN_AVAILABLE = True

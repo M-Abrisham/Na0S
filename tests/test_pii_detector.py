@@ -8,9 +8,8 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.pii_detector import (
+from na0s.layer0.pii_detector import (
     PiiScanResult,
     scan_pii,
     _luhn_check,
@@ -241,20 +240,20 @@ class TestRedactionSafety(unittest.TestCase):
 
 class TestSanitizerIntegration(unittest.TestCase):
     def test_pii_flags_in_sanitizer(self):
-        from layer0.sanitizer import layer0_sanitize
+        from na0s.layer0.sanitizer import layer0_sanitize
         result = layer0_sanitize("Please charge 4111111111111111 for the order")
         self.assertFalse(result.rejected)
         self.assertIn("pii_credit_card", result.anomaly_flags)
         self.assertIn("pii_scan", result.source_metadata)
 
     def test_no_pii_no_flags(self):
-        from layer0.sanitizer import layer0_sanitize
+        from na0s.layer0.sanitizer import layer0_sanitize
         result = layer0_sanitize("What is the weather today?")
         self.assertFalse(result.rejected)
         self.assertNotIn("pii_credit_card", result.anomaly_flags)
 
     def test_ssn_in_sanitizer(self):
-        from layer0.sanitizer import layer0_sanitize
+        from na0s.layer0.sanitizer import layer0_sanitize
         result = layer0_sanitize("My SSN is 123-45-6789")
         self.assertIn("pii_ssn", result.anomaly_flags)
 

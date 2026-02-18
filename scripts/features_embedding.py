@@ -14,9 +14,6 @@ import time
 import numpy as np
 import pandas as pd
 
-# Allow importing safe_pickle from the same src/ directory
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
@@ -26,7 +23,7 @@ except ImportError:
         "This will also install torch and transformers as dependencies."
     )
 
-from safe_pickle import safe_dump
+from na0s.safe_pickle import safe_dump
 
 # ---------------------------------------------------------------------------
 # Paths

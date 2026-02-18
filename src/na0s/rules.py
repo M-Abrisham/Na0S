@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 
-from layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 
 
 @dataclass

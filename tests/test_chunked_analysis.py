@@ -7,9 +7,8 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from predict import (
+from na0s.predict import (
     _chunk_text,
     _head_tail_extract,
     _CHUNK_WORD_THRESHOLD,

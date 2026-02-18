@@ -14,9 +14,6 @@ import sys
 
 import numpy as np
 
-# Allow importing safe_pickle from the same src/ directory
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
@@ -30,7 +27,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 
-from safe_pickle import safe_dump, safe_load
+from na0s.safe_pickle import safe_dump, safe_load
 
 # ---------------------------------------------------------------------------
 # Paths

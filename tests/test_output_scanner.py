@@ -26,10 +26,8 @@ import re
 import sys
 import unittest
 
-# Ensure src/ is on the import path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from output_scanner import OutputScanner, OutputScanResult
+from na0s.output_scanner import OutputScanner, OutputScanResult
 
 
 # ---------------------------------------------------------------------------

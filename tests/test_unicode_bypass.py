@@ -2,11 +2,10 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.normalization import normalize_text, has_invisible_chars, strip_invisible_chars
-from layer0.html_extractor import extract_safe_text
-from layer0 import layer0_sanitize
+from na0s.layer0.normalization import normalize_text, has_invisible_chars, strip_invisible_chars
+from na0s.layer0.html_extractor import extract_safe_text
+from na0s.layer0 import layer0_sanitize
 
 
 class TestFullwidthBypass(unittest.TestCase):

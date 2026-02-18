@@ -20,11 +20,9 @@ import random
 import sys
 import time
 
-# Path setup
+# Path setup — scripts/taxonomy/ needs to be importable
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_project_root = os.path.dirname(_script_dir)
 sys.path.insert(0, _script_dir)
-sys.path.insert(0, os.path.join(_project_root, "src"))
 
 from taxonomy import ALL_PROBES
 from taxonomy._buffs import ALL_BUFFS
@@ -33,7 +31,7 @@ from taxonomy._tags import aggregate_by_taxonomy, summarize_groups
 
 def _load_classifier():
     """Load the model and return a classify_fn compatible with Probe.evaluate()."""
-    from predict import predict_prompt, classify_prompt
+    from na0s.predict import predict_prompt, classify_prompt
 
     vectorizer, model = predict_prompt()
 

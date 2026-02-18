@@ -7,9 +7,8 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.language_detector import (
+from na0s.layer0.language_detector import (
     detect_language,
     _has_mixed_scripts,
     _heuristic_detect,
@@ -163,14 +162,14 @@ class TestSanitizerIntegration(unittest.TestCase):
     """Language detection results should appear in layer0_sanitize() output."""
 
     def test_english_in_sanitizer(self):
-        from layer0.sanitizer import layer0_sanitize
+        from na0s.layer0.sanitizer import layer0_sanitize
         result = layer0_sanitize("What is the weather today in San Francisco?")
         self.assertFalse(result.rejected)
         self.assertIn("language", result.source_metadata)
         self.assertFalse(result.source_metadata["language"]["is_non_english"])
 
     def test_chinese_in_sanitizer(self):
-        from layer0.sanitizer import layer0_sanitize
+        from na0s.layer0.sanitizer import layer0_sanitize
         result = layer0_sanitize("这是一个测试句子用来验证语言检测是否正常工作的功能")
         self.assertFalse(result.rejected)
         self.assertIn("non_english_input", result.anomaly_flags)

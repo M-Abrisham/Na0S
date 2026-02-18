@@ -15,16 +15,12 @@ import json
 import matplotlib
 matplotlib.use('Agg')
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src')
-)
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, precision_recall_curve, auc
 
-from safe_pickle import safe_load
+from na0s.safe_pickle import safe_load
 
 # ---------------------------------------------------------------------------
 # Paths

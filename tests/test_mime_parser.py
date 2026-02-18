@@ -3,9 +3,8 @@ import sys
 import tempfile
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.mime_parser import (
+from na0s.layer0.mime_parser import (
     parse_mime_input,
     _looks_like_mime,
     MIMEParseResult,
@@ -272,7 +271,7 @@ class TestMimeIntegrationWithSanitizer(unittest.TestCase):
     """End-to-end: MIME bytes -> layer0_sanitize -> Layer0Result."""
 
     def test_mime_file_through_sanitizer(self):
-        from layer0 import layer0_sanitize
+        from na0s.layer0 import layer0_sanitize
 
         msg = (
             b"From: alice@example.com\r\n"
@@ -301,7 +300,7 @@ class TestMimeIntegrationWithSanitizer(unittest.TestCase):
             os.unlink(filepath)
 
     def test_mime_bytes_through_sanitizer(self):
-        from layer0 import layer0_sanitize
+        from na0s.layer0 import layer0_sanitize
 
         msg = (
             b"From: alice@example.com\r\n"

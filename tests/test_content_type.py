@@ -7,7 +7,7 @@ import unittest
 
 import base64
 
-from src.layer0.content_type import (
+from na0s.layer0.content_type import (
     ContentTypeResult,
     detect_content_type,
     sniff_binary,
@@ -924,7 +924,7 @@ class TestSanitizerRejectsExecutables(unittest.TestCase):
     def test_exe_rejected_by_sanitizer(self):
         """PE executable bytes should produce a rejected Layer0Result."""
         try:
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
         except ImportError:
             self.skipTest("Sanitizer import requires all L0 modules")
             return
@@ -937,7 +937,7 @@ class TestSanitizerRejectsExecutables(unittest.TestCase):
     def test_elf_rejected_by_sanitizer(self):
         """ELF executable bytes should produce a rejected Layer0Result."""
         try:
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
         except ImportError:
             self.skipTest("Sanitizer import requires all L0 modules")
             return
@@ -950,7 +950,7 @@ class TestSanitizerRejectsExecutables(unittest.TestCase):
     def test_pdf_not_rejected_by_sanitizer(self):
         """PDF is HIGH tier — flagged but NOT rejected."""
         try:
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
         except ImportError:
             self.skipTest("Sanitizer import requires all L0 modules")
             return
@@ -970,14 +970,14 @@ class TestHTMLExtractorIntegration(unittest.TestCase):
 
     def test_pdf_flagged_via_sniff_content_type(self):
         """sniff_content_type should flag PDF via content_type module."""
-        from src.layer0.html_extractor import sniff_content_type
+        from na0s.layer0.html_extractor import sniff_content_type
 
         flags = sniff_content_type("%PDF-1.7 some text here")
         self.assertIn("embedded_pdf", flags)
 
     def test_pdf_bypasses_html_parsing(self):
         """extract_safe_text should flag PDF and skip HTML parsing."""
-        from src.layer0.html_extractor import extract_safe_text
+        from na0s.layer0.html_extractor import extract_safe_text
 
         # PDF magic survives string encoding (all ASCII-range bytes)
         text = "%PDF-1.7 some <b>text</b> content"
@@ -989,7 +989,7 @@ class TestHTMLExtractorIntegration(unittest.TestCase):
 
     def test_gif_bypasses_html_parsing(self):
         """extract_safe_text should flag GIF and skip HTML parsing."""
-        from src.layer0.html_extractor import extract_safe_text
+        from na0s.layer0.html_extractor import extract_safe_text
 
         # GIF magic bytes are ASCII-safe and survive string round-trip
         text = "GIF89a" + "\x00" * 30
@@ -1003,7 +1003,7 @@ class TestHTMLExtractorIntegration(unittest.TestCase):
         """Formats with high bytes (e.g. PNG 0x89) cannot be detected
         via string path because UTF-8 encoding expands them.  This is
         expected: use detect_content_type(bytes) for those."""
-        from src.layer0.html_extractor import extract_safe_text
+        from na0s.layer0.html_extractor import extract_safe_text
 
         # \x89 in Python str is U+0089 -> 2 bytes in UTF-8 (c2 89)
         text = "\x89PNG\r\n\x1a\n" + "\x00" * 30
@@ -1013,7 +1013,7 @@ class TestHTMLExtractorIntegration(unittest.TestCase):
 
     def test_html_still_parsed(self):
         """Plain HTML should still be parsed and stripped normally."""
-        from src.layer0.html_extractor import extract_safe_text
+        from na0s.layer0.html_extractor import extract_safe_text
 
         text = "<html><body><p>Hello world</p></body></html>"
         result_text, flags = extract_safe_text(text)

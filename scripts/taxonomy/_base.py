@@ -199,7 +199,7 @@ class Probe:
         but is self-contained to avoid circular imports.
         """
         if cls._rule_map is None:
-            from src.rules import RULES      # late import — avoids circular deps
+            from na0s.rules import RULES      # late import — avoids circular deps
             cls._rule_map = {r.name: r.technique_ids for r in RULES}
         techniques = set()
         for name in output.hits:

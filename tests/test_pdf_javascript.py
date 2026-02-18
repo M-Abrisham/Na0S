@@ -8,7 +8,7 @@ Covers:
 
 import unittest
 
-from src.layer0.doc_extractor import detect_pdf_javascript, extract_text_from_document
+from na0s.layer0.doc_extractor import detect_pdf_javascript, extract_text_from_document
 
 
 class TestDetectPdfJavascript(unittest.TestCase):

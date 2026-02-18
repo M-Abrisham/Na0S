@@ -14,8 +14,8 @@ Run: python -m unittest tests/test_exif_metadata.py -v
 import unittest
 from unittest.mock import patch, MagicMock
 
-import src.layer0.ocr_extractor as ocr_mod
-from src.layer0.ocr_extractor import (
+import na0s.layer0.ocr_extractor as ocr_mod
+from na0s.layer0.ocr_extractor import (
     ImageMetadataResult,
     extract_image_metadata,
     _decode_exif_value,
@@ -523,7 +523,7 @@ class TestPredictFlagMapIntegration(unittest.TestCase):
         # model files), we read the source and check for the mapping.
         import os
         predict_path = os.path.join(
-            os.path.dirname(__file__), "..", "src", "predict.py"
+            os.path.dirname(__file__), "..", "src", "na0s", "predict.py"
         )
         with open(predict_path, "r") as f:
             source = f.read()

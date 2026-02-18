@@ -12,55 +12,52 @@ to the original classify_prompt() pipeline while maintaining high recall on
 genuinely malicious inputs.
 """
 
-import os
 import re
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from safe_pickle import safe_load
-from rules import rule_score, rule_score_detailed
-from obfuscation import obfuscation_scan
-from layer0 import layer0_sanitize
-from layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+from .safe_pickle import safe_load
+from .rules import rule_score, rule_score_detailed
+from .obfuscation import obfuscation_scan
+from .layer0 import layer0_sanitize
+from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+from .models import get_model_path
 
 # Layer 5: Embedding-based classifier — optional import
 try:
-    from predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
+    from .predict_embedding import classify_prompt_embedding, load_models as _load_embedding_models
     _HAS_EMBEDDING = True
 except ImportError:
     _HAS_EMBEDDING = False
 
 # Layer 7: LLM checker — optional import
 try:
-    from llm_checker import LLMChecker, LLMCheckResult
+    from .llm_checker import LLMChecker, LLMCheckResult
     _HAS_LLM_CHECKER = True
 except ImportError:
     _HAS_LLM_CHECKER = False
 
 # Layer 8: Positive validation — optional import
 try:
-    from positive_validation import PositiveValidator, ValidationResult
+    from .positive_validation import PositiveValidator, ValidationResult
     _HAS_POSITIVE_VALIDATION = True
 except ImportError:
     _HAS_POSITIVE_VALIDATION = False
 
 # Layer 9: Output scanner — optional import
 try:
-    from output_scanner import OutputScanner, OutputScanResult
+    from .output_scanner import OutputScanner, OutputScanResult
     _HAS_OUTPUT_SCANNER = True
 except ImportError:
     _HAS_OUTPUT_SCANNER = False
 
 # Layer 10: Canary token detection — optional import
 try:
-    from canary import CanaryManager, CanaryToken
+    from .canary import CanaryManager, CanaryToken
     _HAS_CANARY = True
 except ImportError:
     _HAS_CANARY = False
 
-MODEL_PATH = "data/processed/model.pkl"
-VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
+MODEL_PATH = get_model_path("model.pkl")
+VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 
 
 # ---------------------------------------------------------------------------

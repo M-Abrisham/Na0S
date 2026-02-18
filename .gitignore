@@ -4,3 +4,8 @@ data/*
 !data/datasets.lock
 __pycache__/
 .DS_Store
+*.egg-info/
+dist/
+build/
+.hypothesis/
+*.db

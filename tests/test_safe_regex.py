@@ -24,9 +24,8 @@ import sys
 import time
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.safe_regex import (
+from na0s.layer0.safe_regex import (
     check_pattern_safety,
     safe_compile,
     safe_match,
@@ -279,7 +278,7 @@ class TestExistingRulesAreSafe(unittest.TestCase):
     """Verify every pattern in rules.RULES passes the safety auditor."""
 
     def test_all_rule_patterns_pass_safety_check(self):
-        from rules import RULES
+        from na0s.rules import RULES
         for rule in RULES:
             with self.subTest(rule=rule.name):
                 warnings = check_pattern_safety(rule.pattern)
@@ -292,7 +291,7 @@ class TestExistingRulesAreSafe(unittest.TestCase):
 
     def test_all_rule_patterns_compile_via_safe_compile(self):
         """Every rule pattern should compile through safe_compile without error."""
-        from rules import RULES
+        from na0s.rules import RULES
         for rule in RULES:
             with self.subTest(rule=rule.name):
                 pat = safe_compile(rule.pattern, re.IGNORECASE)

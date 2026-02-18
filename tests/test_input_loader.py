@@ -7,9 +7,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 from io import BytesIO
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.input_loader import (
+from na0s.layer0.input_loader import (
     load_input,
     InputLoadError,
     _is_url,
@@ -174,7 +173,7 @@ class TestFileSizeLimit(unittest.TestCase):
             f.flush()
 
         try:
-            import layer0.input_loader as loader
+            import na0s.layer0.input_loader as loader
             orig = loader.MAX_FILE_SIZE
             loader.MAX_FILE_SIZE = 1024
             try:
@@ -195,7 +194,7 @@ class TestFileSizeLimit(unittest.TestCase):
             f.flush()
 
         try:
-            import layer0.input_loader as loader
+            import na0s.layer0.input_loader as loader
             orig = loader.MAX_FILE_SIZE
             loader.MAX_FILE_SIZE = 1024
             try:
@@ -310,8 +309,8 @@ def _mock_opener(mock_resp):
 class TestURLLoading(unittest.TestCase):
     """URL inputs should be fetched with urllib."""
 
-    @patch("layer0.input_loader._validate_url_target")
-    @patch("layer0.input_loader._build_safe_opener")
+    @patch("na0s.layer0.input_loader._validate_url_target")
+    @patch("na0s.layer0.input_loader._build_safe_opener")
     def test_https_url_success(self, mock_build, mock_ssrf):
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"<html>Hello</html>"
@@ -330,9 +329,9 @@ class TestURLLoading(unittest.TestCase):
             load_input("http://example.com/page")
         self.assertIn("HTTPS only", str(ctx.exception))
 
-    @patch("layer0.input_loader.HTTPS_ONLY", False)
-    @patch("layer0.input_loader._validate_url_target")
-    @patch("layer0.input_loader._build_safe_opener")
+    @patch("na0s.layer0.input_loader.HTTPS_ONLY", False)
+    @patch("na0s.layer0.input_loader._validate_url_target")
+    @patch("na0s.layer0.input_loader._build_safe_opener")
     def test_http_allowed_when_configured(self, mock_build, mock_ssrf):
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"content"
@@ -343,8 +342,8 @@ class TestURLLoading(unittest.TestCase):
         self.assertEqual(content, b"content")
         self.assertEqual(meta["source_type"], "url")
 
-    @patch("layer0.input_loader._validate_url_target")
-    @patch("layer0.input_loader._build_safe_opener")
+    @patch("na0s.layer0.input_loader._validate_url_target")
+    @patch("na0s.layer0.input_loader._build_safe_opener")
     def test_url_fetch_failure(self, mock_build, mock_ssrf):
         import urllib.error
         mock_opener = MagicMock()
@@ -355,10 +354,10 @@ class TestURLLoading(unittest.TestCase):
             load_input("https://example.com/fail")
         self.assertIn("URL fetch failed", str(ctx.exception))
 
-    @patch("layer0.input_loader._validate_url_target")
-    @patch("layer0.input_loader._build_safe_opener")
+    @patch("na0s.layer0.input_loader._validate_url_target")
+    @patch("na0s.layer0.input_loader._build_safe_opener")
     def test_url_oversized_response(self, mock_build, mock_ssrf):
-        import layer0.input_loader as loader
+        import na0s.layer0.input_loader as loader
         orig = loader.MAX_URL_RESPONSE_SIZE
         loader.MAX_URL_RESPONSE_SIZE = 100
 
@@ -427,7 +426,7 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
     """End-to-end: file path -> layer0_sanitize -> Layer0Result."""
 
     def test_file_through_sanitizer(self):
-        from layer0 import layer0_sanitize
+        from na0s.layer0 import layer0_sanitize
 
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False
@@ -446,7 +445,7 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
             os.unlink(filepath)
 
     def test_plain_text_no_source_metadata(self):
-        from layer0 import layer0_sanitize
+        from na0s.layer0 import layer0_sanitize
 
         result = layer0_sanitize("Hello world, this is a test.")
         self.assertFalse(result.rejected)
@@ -454,10 +453,10 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
         # (language detection metadata is expected from Step 5)
         self.assertNotIn("source_type", result.source_metadata)
 
-    @patch("layer0.input_loader._validate_url_target")
-    @patch("layer0.input_loader._build_safe_opener")
+    @patch("na0s.layer0.input_loader._validate_url_target")
+    @patch("na0s.layer0.input_loader._build_safe_opener")
     def test_url_through_sanitizer(self, mock_build, mock_ssrf):
-        from layer0 import layer0_sanitize
+        from na0s.layer0 import layer0_sanitize
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"URL content for testing purposes."
@@ -470,7 +469,7 @@ class TestIntegrationWithSanitizer(unittest.TestCase):
         self.assertIn("input_loaded_from_url", result.anomaly_flags)
 
     def test_bytes_still_works(self):
-        from layer0 import layer0_sanitize
+        from na0s.layer0 import layer0_sanitize
 
         result = layer0_sanitize(b"Bytes input for testing.")
         self.assertFalse(result.rejected)
@@ -611,7 +610,7 @@ class TestTOCTOUSafeFileOpen(unittest.TestCase):
                     open_count[0] += 1
                 return original_open(path, flags, *args, **kwargs)
 
-            with patch("layer0.input_loader.os.open", side_effect=counting_open):
+            with patch("na0s.layer0.input_loader.os.open", side_effect=counting_open):
                 content, meta = load_input(filepath)
 
             self.assertEqual(content, b"single fd test")

@@ -14,32 +14,27 @@ Usage:
     PYTHONPATH=src:. python src/predict_embedding.py
 """
 
-import os
-import sys
-
-# Allow importing sibling modules from the same src/ directory
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
     raise ImportError(
         "sentence-transformers is required for embedding-based prediction.\n"
-        "Install it with:  pip install sentence-transformers\n"
+        "Install it with:  pip install 'na0s[embedding]'\n"
         "This will also install torch and transformers as dependencies."
     )
 
 import numpy as np
 
-from safe_pickle import safe_load
-from rules import rule_score
-from obfuscation import obfuscation_scan
-from layer0 import layer0_sanitize
+from .safe_pickle import safe_load
+from .rules import rule_score
+from .obfuscation import obfuscation_scan
+from .layer0 import layer0_sanitize
+from .models import get_model_path
 
 # ---------------------------------------------------------------------------
 # Paths / constants
 # ---------------------------------------------------------------------------
-MODEL_PATH = "data/processed/model_embedding.pkl"
+MODEL_PATH = get_model_path("model_embedding.pkl")
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 # If the ML model's P(safe) exceeds this value, rule hits alone will NOT

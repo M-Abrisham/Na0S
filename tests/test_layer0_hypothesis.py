@@ -35,12 +35,11 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Project imports
 # ---------------------------------------------------------------------------
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0 import layer0_sanitize
-from layer0.result import Layer0Result
-from layer0.normalization import normalize_text
-from layer0.validation import MAX_INPUT_LENGTH
+from na0s.layer0 import layer0_sanitize
+from na0s.layer0.result import Layer0Result
+from na0s.layer0.normalization import normalize_text
+from na0s.layer0.validation import MAX_INPUT_LENGTH
 
 # ---------------------------------------------------------------------------
 # Shared Hypothesis settings and strategies

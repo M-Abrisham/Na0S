@@ -11,7 +11,7 @@ os.environ["L0_MAX_EXPANSION_RATIO"] = "10.0"
 os.environ["L0_MEMORY_CAP_MB"] = "50"
 os.environ["L0_RATE_LIMIT_ENABLED"] = "0"
 
-from src.layer0.resource_guard import (
+from na0s.layer0.resource_guard import (
     MAX_HTML_DEPTH,
     MAX_INPUT_BYTES,
     MAX_INPUT_CHARS,

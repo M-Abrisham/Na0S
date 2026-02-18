@@ -1,25 +1,26 @@
 import sqlite3
 
-from layer0 import layer0_sanitize, register_malicious
-from layer0.timeout import (
+from .layer0 import layer0_sanitize, register_malicious
+from .layer0.timeout import (
     Layer0TimeoutError,
     SCAN_TIMEOUT,
     with_timeout,
 )
-from obfuscation import obfuscation_scan
-from rules import rule_score, rule_score_detailed, RULES
-from scan_result import ScanResult
-from safe_pickle import safe_load
+from .obfuscation import obfuscation_scan
+from .rules import rule_score, rule_score_detailed, RULES
+from .scan_result import ScanResult
+from .safe_pickle import safe_load
+from .models import get_model_path
 
 # Layer 3: Structural Features — optional import
 try:
-    from structural_features import extract_structural_features
+    from .structural_features import extract_structural_features
     _HAS_STRUCTURAL_FEATURES = True
 except ImportError:
     _HAS_STRUCTURAL_FEATURES = False
 
-MODEL_PATH = "data/processed/model.pkl"
-VECTORIZER_PATH = "data/processed/tfidf_vectorizer.pkl"
+MODEL_PATH = get_model_path("model.pkl")
+VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 DECISION_THRESHOLD = 0.55
 
 # Severity-to-weight mapping for rule hits in weighted voting
@@ -70,6 +71,18 @@ def _head_tail_extract(text, head_tokens=_HEAD_TOKENS, tail_tokens=_TAIL_TOKENS)
 
 
 def predict_prompt():
+    import os
+    for path, label in [(VECTORIZER_PATH, "TF-IDF vectorizer"), (MODEL_PATH, "classifier model")]:
+        if not os.path.isfile(path):
+            raise RuntimeError(
+                f"Na0S {label} not found at {path}. "
+                "Run the training pipeline first:\n"
+                "  python scripts/dataset.py\n"
+                "  python scripts/process_data.py\n"
+                "  python scripts/features.py\n"
+                "  python scripts/model.py\n"
+                "Then copy the resulting .pkl files into src/na0s/models/."
+            )
     vectorizer = safe_load(VECTORIZER_PATH)
     model = safe_load(MODEL_PATH)
     return vectorizer, model

@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from safe_pickle import safe_dump
+from na0s.safe_pickle import safe_dump
 
 # Paths
 INPUT_PATH = "data/processed/combined_data.csv"

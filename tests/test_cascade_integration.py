@@ -30,8 +30,6 @@ import sys
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
 
-# Ensure src/ is on the import path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # Disable thread-based scan timeout so signal.SIGALRM works in main thread.
 # Must be set BEFORE importing predict/cascade, since timeout.py reads env
@@ -39,16 +37,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
 
 # Check if model files exist
-_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "data", "processed", "model.pkl"
-)
-_VECTORIZER_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "data", "processed", "tfidf_vectorizer.pkl"
-)
+from na0s.models import get_model_path
+_MODEL_PATH = get_model_path("model.pkl")
+_VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 _MODELS_AVAILABLE = os.path.isfile(_MODEL_PATH) and os.path.isfile(_VECTORIZER_PATH)
 
 # Import cascade components -- WhitelistFilter needs no model files
-from cascade import (
+from na0s.cascade import (
     WhitelistFilter,
     WeightedClassifier,
     CascadeClassifier,
@@ -60,7 +55,7 @@ _CASCADE_SKIP_REASON = ""
 
 if _MODELS_AVAILABLE:
     try:
-        from safe_pickle import safe_load
+        from na0s.safe_pickle import safe_load
         _vectorizer = safe_load(_VECTORIZER_PATH)
         _model = safe_load(_MODEL_PATH)
         _CASCADE_AVAILABLE = True
@@ -588,7 +583,7 @@ class TestCascadeCanary(unittest.TestCase):
 
     @unittest.skipUnless(
         # Check if canary module is importable
-        (lambda: __import__("canary") and True)() if True else False,
+        (lambda: __import__("na0s.canary") and True)() if True else False,
         "canary module not available"
     )
     def _skip_check(self):

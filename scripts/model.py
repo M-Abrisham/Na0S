@@ -3,7 +3,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import accuracy_score, classification_report
-from safe_pickle import safe_load, safe_dump
+from na0s.safe_pickle import safe_load, safe_dump
 import numpy as np
 
 FEATURES_PATH = "data/processed/features.pkl"

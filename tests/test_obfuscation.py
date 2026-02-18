@@ -2,9 +2,8 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from obfuscation import obfuscation_scan
+from na0s.obfuscation import obfuscation_scan
 
 
 class TestObfuscationScan(unittest.TestCase):

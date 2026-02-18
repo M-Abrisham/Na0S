@@ -12,20 +12,13 @@ Usage:
 import os
 import sys
 
-# ---------------------------------------------------------------------------
-# Path setup -- allow imports from src/
-# ---------------------------------------------------------------------------
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
-)
-
 import csv
 
 import numpy as np
 import pandas as pd
 
-from rules import rule_score
-from safe_pickle import safe_load
+from na0s.rules import rule_score
+from na0s.safe_pickle import safe_load
 
 # ---------------------------------------------------------------------------
 # Paths (relative to project root)

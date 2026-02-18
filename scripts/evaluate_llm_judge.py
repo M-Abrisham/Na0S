@@ -15,11 +15,7 @@ import os
 import sys
 import time
 
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
-)
-
-from llm_judge import LLMJudge
+from na0s.llm_judge import LLMJudge
 
 PROJECT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DATASET_PATH = os.path.join(

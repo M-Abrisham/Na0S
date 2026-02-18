@@ -20,10 +20,10 @@ class TestDocResultDataclass(unittest.TestCase):
 
     def test_import_succeeds(self):
         """Module must import without error regardless of deps."""
-        from src.layer0.doc_extractor import DocResult  # noqa: F401
+        from na0s.layer0.doc_extractor import DocResult  # noqa: F401
 
     def test_default_values(self):
-        from src.layer0.doc_extractor import DocResult
+        from na0s.layer0.doc_extractor import DocResult
 
         r = DocResult()
         self.assertEqual(r.text, "")
@@ -33,7 +33,7 @@ class TestDocResultDataclass(unittest.TestCase):
         self.assertEqual(r.warnings, [])
 
     def test_custom_values(self):
-        from src.layer0.doc_extractor import DocResult
+        from na0s.layer0.doc_extractor import DocResult
 
         r = DocResult(
             text="content",
@@ -50,7 +50,7 @@ class TestDocResultDataclass(unittest.TestCase):
 
     def test_warnings_list_independence(self):
         """Each instance should have its own warnings list."""
-        from src.layer0.doc_extractor import DocResult
+        from na0s.layer0.doc_extractor import DocResult
 
         r1 = DocResult()
         r2 = DocResult()
@@ -59,7 +59,7 @@ class TestDocResultDataclass(unittest.TestCase):
 
     def test_metadata_dict_independence(self):
         """Each instance should have its own metadata dict."""
-        from src.layer0.doc_extractor import DocResult
+        from na0s.layer0.doc_extractor import DocResult
 
         r1 = DocResult()
         r2 = DocResult()
@@ -71,7 +71,7 @@ class TestDetectDocType(unittest.TestCase):
     """Magic-byte document format detection."""
 
     def setUp(self):
-        from src.layer0.doc_extractor import detect_doc_type
+        from na0s.layer0.doc_extractor import detect_doc_type
         self.detect = detect_doc_type
 
     def test_pdf(self):
@@ -105,7 +105,7 @@ class TestDocSizeLimits(unittest.TestCase):
     """Document size limit enforcement."""
 
     def test_exceeds_doc_byte_limit(self):
-        from src.layer0.doc_extractor import extract_text_from_document
+        from na0s.layer0.doc_extractor import extract_text_from_document
 
         huge = b"\x00" * 200
         result = extract_text_from_document(huge, "pdf", max_doc_bytes=100)
@@ -114,7 +114,7 @@ class TestDocSizeLimits(unittest.TestCase):
 
     def test_text_truncation(self):
         """Extracted text exceeding max_text_bytes gets truncated."""
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         original_pymupdf = doc_extractor._HAS_PYMUPDF
         original_pdfplumber = doc_extractor._HAS_PDFPLUMBER
@@ -152,7 +152,7 @@ class TestUnsupportedFormat(unittest.TestCase):
     """Unsupported document types return clean warnings."""
 
     def test_unknown_type(self):
-        from src.layer0.doc_extractor import extract_text_from_document
+        from na0s.layer0.doc_extractor import extract_text_from_document
 
         result = extract_text_from_document(b"data", "mp4")
         self.assertEqual(result.text, "")
@@ -161,7 +161,7 @@ class TestUnsupportedFormat(unittest.TestCase):
 
     def test_case_insensitive_type(self):
         """doc_type is case-insensitive."""
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         # "PDF" should be lowered to "pdf" and dispatched correctly
         # If no library is installed, we still get proper dispatch (not "Unsupported")
@@ -175,7 +175,7 @@ class TestGracefulDegradation(unittest.TestCase):
     """When extraction libraries are missing, functions still return cleanly."""
 
     def test_no_pdf_library(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = (
             doc_extractor._HAS_PYMUPDF,
@@ -200,7 +200,7 @@ class TestGracefulDegradation(unittest.TestCase):
             ) = orig
 
     def test_no_docx_library(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_DOCX
         try:
@@ -214,7 +214,7 @@ class TestGracefulDegradation(unittest.TestCase):
             doc_extractor._HAS_DOCX = orig
 
     def test_no_rtf_library(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_STRIPRTF
         try:
@@ -228,7 +228,7 @@ class TestGracefulDegradation(unittest.TestCase):
             doc_extractor._HAS_STRIPRTF = orig
 
     def test_no_xlsx_library(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_OPENPYXL
         try:
@@ -242,7 +242,7 @@ class TestGracefulDegradation(unittest.TestCase):
             doc_extractor._HAS_OPENPYXL = orig
 
     def test_no_pptx_library(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_PPTX
         try:
@@ -260,7 +260,7 @@ class TestMockedPDFExtraction(unittest.TestCase):
     """Test PDF extraction paths via mocking."""
 
     def test_pymupdf_extraction(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = (
             doc_extractor._HAS_PYMUPDF,
@@ -298,7 +298,7 @@ class TestMockedPDFExtraction(unittest.TestCase):
 
     def test_pymupdf_fallback_to_pdfplumber(self):
         """If pymupdf fails, falls back to pdfplumber."""
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = (
             doc_extractor._HAS_PYMUPDF,
@@ -339,7 +339,7 @@ class TestMockedPDFExtraction(unittest.TestCase):
 
     def test_page_limit_enforcement(self):
         """PDF with more pages than limit emits a warning."""
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = (
             doc_extractor._HAS_PYMUPDF,
@@ -385,7 +385,7 @@ class TestMockedDOCXExtraction(unittest.TestCase):
     """Test DOCX extraction via mocking."""
 
     def test_docx_extraction(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_DOCX
         try:
@@ -425,7 +425,7 @@ class TestMockedRTFExtraction(unittest.TestCase):
     """Test RTF extraction via mocking."""
 
     def test_rtf_extraction(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_STRIPRTF
         try:
@@ -449,7 +449,7 @@ class TestMockedXLSXExtraction(unittest.TestCase):
     """Test XLSX extraction via mocking."""
 
     def test_xlsx_extraction(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_OPENPYXL
         try:
@@ -483,7 +483,7 @@ class TestMockedPPTXExtraction(unittest.TestCase):
     """Test PPTX extraction via mocking."""
 
     def test_pptx_extraction(self):
-        from src.layer0 import doc_extractor
+        from na0s.layer0 import doc_extractor
 
         orig = doc_extractor._HAS_PPTX
         try:
@@ -525,11 +525,11 @@ class TestSanitizerExtractorIntegration(unittest.TestCase):
 
     def test_try_binary_extraction_import(self):
         """The helper function is importable from sanitizer."""
-        from src.layer0.sanitizer import _try_binary_extraction  # noqa: F401
+        from na0s.layer0.sanitizer import _try_binary_extraction  # noqa: F401
 
     def test_plain_text_bytes_unchanged(self):
         """Plain text bytes pass through unchanged."""
-        from src.layer0.sanitizer import _try_binary_extraction
+        from na0s.layer0.sanitizer import _try_binary_extraction
 
         data = b"Hello, this is normal text."
         result, flags, meta = _try_binary_extraction(data, [], {})
@@ -538,7 +538,7 @@ class TestSanitizerExtractorIntegration(unittest.TestCase):
 
     def test_pdf_bytes_flagged(self):
         """PDF magic bytes are detected and flagged."""
-        from src.layer0.sanitizer import _try_binary_extraction
+        from na0s.layer0.sanitizer import _try_binary_extraction
 
         data = b"%PDF-1.4 some content here"
         result, flags, meta = _try_binary_extraction(data, [], {})
@@ -549,7 +549,7 @@ class TestSanitizerExtractorIntegration(unittest.TestCase):
 
     def test_image_bytes_flagged(self):
         """Image magic bytes are detected and flagged."""
-        from src.layer0.sanitizer import _try_binary_extraction
+        from na0s.layer0.sanitizer import _try_binary_extraction
 
         data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
         result, flags, meta = _try_binary_extraction(data, [], {})

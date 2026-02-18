@@ -9,7 +9,7 @@ from unittest import mock
 # Ensure env vars are set BEFORE importing the module under test
 os.environ.setdefault("L0_TIMEOUT_SEC", "5")
 
-from src.layer0.timeout import (
+from na0s.layer0.timeout import (
     DEFAULT_TIMEOUT,
     L0_PIPELINE_TIMEOUT,
     Layer0TimeoutError,
@@ -134,11 +134,11 @@ class TestSanitizerTimeoutIntegration(unittest.TestCase):
             return text, 0, []
 
         with mock.patch(
-            "src.layer0.sanitizer.normalize_text", side_effect=slow_normalize
+            "na0s.layer0.sanitizer.normalize_text", side_effect=slow_normalize
         ), mock.patch(
-            "src.layer0.sanitizer.get_step_timeout", return_value=0.1
+            "na0s.layer0.sanitizer.get_step_timeout", return_value=0.1
         ):
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
             result = layer0_sanitize("Hello world test input")
 
         self.assertTrue(result.rejected)
@@ -152,11 +152,11 @@ class TestSanitizerTimeoutIntegration(unittest.TestCase):
             return text, []
 
         with mock.patch(
-            "src.layer0.sanitizer.extract_safe_text", side_effect=slow_html
+            "na0s.layer0.sanitizer.extract_safe_text", side_effect=slow_html
         ), mock.patch(
-            "src.layer0.sanitizer.get_step_timeout", return_value=0.1
+            "na0s.layer0.sanitizer.get_step_timeout", return_value=0.1
         ):
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
             result = layer0_sanitize("Hello world test input")
 
         self.assertTrue(result.rejected)
@@ -170,12 +170,12 @@ class TestSanitizerTimeoutIntegration(unittest.TestCase):
             return [], 0.0, {}
 
         with mock.patch(
-            "src.layer0.sanitizer.check_tokenization_anomaly",
+            "na0s.layer0.sanitizer.check_tokenization_anomaly",
             side_effect=slow_tokenize,
         ), mock.patch(
-            "src.layer0.sanitizer.get_step_timeout", return_value=0.1
+            "na0s.layer0.sanitizer.get_step_timeout", return_value=0.1
         ):
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
             result = layer0_sanitize("Hello world test input")
 
         self.assertTrue(result.rejected)
@@ -188,12 +188,12 @@ class TestSanitizerTimeoutIntegration(unittest.TestCase):
             time.sleep(10)
 
         with mock.patch(
-            "src.layer0.sanitizer._layer0_sanitize_inner",
+            "na0s.layer0.sanitizer._layer0_sanitize_inner",
             side_effect=slow_inner,
         ), mock.patch(
-            "src.layer0.sanitizer.L0_PIPELINE_TIMEOUT", 0.1
+            "na0s.layer0.sanitizer.L0_PIPELINE_TIMEOUT", 0.1
         ):
-            from src.layer0.sanitizer import layer0_sanitize
+            from na0s.layer0.sanitizer import layer0_sanitize
             result = layer0_sanitize("Hello world test input")
 
         self.assertTrue(result.rejected)
@@ -202,7 +202,7 @@ class TestSanitizerTimeoutIntegration(unittest.TestCase):
 
     def test_normal_input_still_works(self):
         """Quick sanity check: normal input passes through with no timeout."""
-        from src.layer0.sanitizer import layer0_sanitize
+        from na0s.layer0.sanitizer import layer0_sanitize
         result = layer0_sanitize("Hello world")
         self.assertFalse(result.rejected)
         self.assertEqual(result.rejection_reason, "")
@@ -216,20 +216,12 @@ class TestScanTimeoutIntegration(unittest.TestCase):
         def slow_classify(text, vectorizer, model):
             time.sleep(10)
 
-        # Add src to path for predict imports
-        src_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src",
-        )
-        if src_dir not in sys.path:
-            sys.path.insert(0, src_dir)
-
         with mock.patch(
-            "predict.classify_prompt", side_effect=slow_classify
+            "na0s.predict.classify_prompt", side_effect=slow_classify
         ), mock.patch(
-            "predict.SCAN_TIMEOUT", 0.1
+            "na0s.predict.SCAN_TIMEOUT", 0.1
         ):
-            from predict import scan
+            from na0s.predict import scan
             fake_vectorizer = mock.MagicMock()
             fake_model = mock.MagicMock()
             result = scan("test input", fake_vectorizer, fake_model)

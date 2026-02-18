@@ -10,8 +10,8 @@ Run: python -m unittest tests/test_content_type_mismatch.py -v
 import unittest
 from unittest.mock import patch, MagicMock
 
-from src.layer0.content_type import ContentTypeResult
-from src.layer0.sanitizer import (
+from na0s.layer0.content_type import ContentTypeResult
+from na0s.layer0.sanitizer import (
     _check_content_type_mismatch,
     _get_mime_family,
     _MIME_FAMILY_MAP,
@@ -263,7 +263,7 @@ class TestMismatchIntegration(unittest.TestCase):
     content types.
     """
 
-    @patch("src.layer0.sanitizer.load_input")
+    @patch("na0s.layer0.sanitizer.load_input")
     def test_url_text_declared_exe_detected(self, mock_load):
         """URL declares text/plain but serves EXE bytes -> mismatch + reject."""
         mock_load.return_value = (
@@ -286,7 +286,7 @@ class TestMismatchIntegration(unittest.TestCase):
         self.assertEqual(mismatch["declared_family"], "text")
         self.assertEqual(mismatch["detected_family"], "executable")
 
-    @patch("src.layer0.sanitizer.load_input")
+    @patch("na0s.layer0.sanitizer.load_input")
     def test_url_image_declared_pdf_detected(self, mock_load):
         """URL declares image/png but serves PDF bytes -> mismatch flagged."""
         mock_load.return_value = (
@@ -305,7 +305,7 @@ class TestMismatchIntegration(unittest.TestCase):
         self.assertEqual(mismatch["declared_family"], "image")
         self.assertEqual(mismatch["detected_family"], "document")
 
-    @patch("src.layer0.sanitizer.load_input")
+    @patch("na0s.layer0.sanitizer.load_input")
     def test_url_no_mismatch_when_types_agree(self, mock_load):
         """URL declares image/png and serves PNG bytes -> no mismatch."""
         mock_load.return_value = (
@@ -320,7 +320,7 @@ class TestMismatchIntegration(unittest.TestCase):
         result = layer0_sanitize("https://example.com/image.png")
         self.assertNotIn("content_type_mismatch", result.anomaly_flags)
 
-    @patch("src.layer0.sanitizer.load_input")
+    @patch("na0s.layer0.sanitizer.load_input")
     def test_url_no_mismatch_for_octet_stream(self, mock_load):
         """URL declares application/octet-stream -> no mismatch (generic)."""
         mock_load.return_value = (
@@ -335,7 +335,7 @@ class TestMismatchIntegration(unittest.TestCase):
         result = layer0_sanitize("https://example.com/data.bin")
         self.assertNotIn("content_type_mismatch", result.anomaly_flags)
 
-    @patch("src.layer0.sanitizer.load_input")
+    @patch("na0s.layer0.sanitizer.load_input")
     def test_url_no_mismatch_when_no_declared_type(self, mock_load):
         """URL with no Content-Type header -> no mismatch."""
         mock_load.return_value = (
@@ -350,7 +350,7 @@ class TestMismatchIntegration(unittest.TestCase):
         result = layer0_sanitize("https://example.com/unknown")
         self.assertNotIn("content_type_mismatch", result.anomaly_flags)
 
-    @patch("src.layer0.sanitizer.load_input")
+    @patch("na0s.layer0.sanitizer.load_input")
     def test_file_text_declared_exe_detected(self, mock_load):
         """File extension says text/plain but content is EXE -> mismatch."""
         mock_load.return_value = (

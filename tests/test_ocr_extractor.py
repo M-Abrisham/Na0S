@@ -22,10 +22,10 @@ class TestOCRResultDataclass(unittest.TestCase):
 
     def test_import_succeeds(self):
         """Module must import without error regardless of deps."""
-        from src.layer0.ocr_extractor import OCRResult  # noqa: F401
+        from na0s.layer0.ocr_extractor import OCRResult  # noqa: F401
 
     def test_default_values(self):
-        from src.layer0.ocr_extractor import OCRResult
+        from na0s.layer0.ocr_extractor import OCRResult
 
         r = OCRResult()
         self.assertEqual(r.text, "")
@@ -35,7 +35,7 @@ class TestOCRResultDataclass(unittest.TestCase):
         self.assertEqual(r.warnings, [])
 
     def test_custom_values(self):
-        from src.layer0.ocr_extractor import OCRResult
+        from na0s.layer0.ocr_extractor import OCRResult
 
         r = OCRResult(
             text="hello",
@@ -52,7 +52,7 @@ class TestOCRResultDataclass(unittest.TestCase):
 
     def test_warnings_list_independence(self):
         """Each instance should have its own warnings list."""
-        from src.layer0.ocr_extractor import OCRResult
+        from na0s.layer0.ocr_extractor import OCRResult
 
         r1 = OCRResult()
         r2 = OCRResult()
@@ -64,7 +64,7 @@ class TestDetectImageFormat(unittest.TestCase):
     """Magic-byte image format detection."""
 
     def setUp(self):
-        from src.layer0.ocr_extractor import detect_image_format
+        from na0s.layer0.ocr_extractor import detect_image_format
         self.detect = detect_image_format
 
     def test_png(self):
@@ -114,7 +114,7 @@ class TestExtractTextFromImageSizeLimits(unittest.TestCase):
     """Size limit enforcement."""
 
     def test_exceeds_default_max(self):
-        from src.layer0.ocr_extractor import extract_text_from_image, MAX_IMAGE_BYTES
+        from na0s.layer0.ocr_extractor import extract_text_from_image, MAX_IMAGE_BYTES
 
         huge = b"\x00" * (MAX_IMAGE_BYTES + 1)
         result = extract_text_from_image(huge)
@@ -123,7 +123,7 @@ class TestExtractTextFromImageSizeLimits(unittest.TestCase):
         self.assertTrue(any("size limit" in w for w in result.warnings))
 
     def test_exceeds_custom_max(self):
-        from src.layer0.ocr_extractor import extract_text_from_image
+        from na0s.layer0.ocr_extractor import extract_text_from_image
 
         data = b"\x00" * 200
         result = extract_text_from_image(data, max_bytes=100)
@@ -132,7 +132,7 @@ class TestExtractTextFromImageSizeLimits(unittest.TestCase):
 
     def test_within_custom_max(self):
         """Data within limit proceeds to next check (PIL/engine)."""
-        from src.layer0.ocr_extractor import extract_text_from_image
+        from na0s.layer0.ocr_extractor import extract_text_from_image
 
         data = b"\x00" * 50
         result = extract_text_from_image(data, max_bytes=100)
@@ -145,7 +145,7 @@ class TestGracefulDegradation(unittest.TestCase):
 
     def test_no_pil_returns_warning(self):
         """If PIL is missing, we get a clear warning."""
-        from src.layer0 import ocr_extractor
+        from na0s.layer0 import ocr_extractor
 
         original_pil = ocr_extractor._HAS_PIL
         original_easyocr = ocr_extractor._HAS_EASYOCR
@@ -165,7 +165,7 @@ class TestGracefulDegradation(unittest.TestCase):
 
     def test_pil_only_no_ocr_engine(self):
         """PIL available but no OCR engine returns warning."""
-        from src.layer0 import ocr_extractor
+        from na0s.layer0 import ocr_extractor
 
         original_easyocr = ocr_extractor._HAS_EASYOCR
         original_tess = ocr_extractor._HAS_TESSERACT
@@ -182,7 +182,7 @@ class TestGracefulDegradation(unittest.TestCase):
 
     def test_language_passthrough(self):
         """Language parameter is preserved in result even on failure."""
-        from src.layer0.ocr_extractor import extract_text_from_image
+        from na0s.layer0.ocr_extractor import extract_text_from_image
 
         result = extract_text_from_image(b"\x00" * 50, language="de")
         self.assertEqual(result.language, "de")
@@ -192,7 +192,7 @@ class TestIsoToTesseractLang(unittest.TestCase):
     """Language code conversion helper."""
 
     def test_known_codes(self):
-        from src.layer0.ocr_extractor import _iso_to_tesseract_lang
+        from na0s.layer0.ocr_extractor import _iso_to_tesseract_lang
 
         self.assertEqual(_iso_to_tesseract_lang("en"), "eng")
         self.assertEqual(_iso_to_tesseract_lang("de"), "deu")
@@ -200,7 +200,7 @@ class TestIsoToTesseractLang(unittest.TestCase):
         self.assertEqual(_iso_to_tesseract_lang("zh"), "chi_sim")
 
     def test_unknown_code_passthrough(self):
-        from src.layer0.ocr_extractor import _iso_to_tesseract_lang
+        from na0s.layer0.ocr_extractor import _iso_to_tesseract_lang
 
         self.assertEqual(_iso_to_tesseract_lang("xx"), "xx")
 
@@ -210,7 +210,7 @@ class TestMockedEasyOCR(unittest.TestCase):
 
     def test_easyocr_extraction_path(self):
         """Simulate a successful EasyOCR extraction."""
-        from src.layer0 import ocr_extractor
+        from na0s.layer0 import ocr_extractor
 
         if not ocr_extractor._HAS_PIL:
             self.skipTest("Pillow not installed")
@@ -240,7 +240,7 @@ class TestMockedEasyOCR(unittest.TestCase):
                 # Also need numpy for the conversion
                 with patch.dict(sys.modules, {"numpy": MagicMock()}):
                     import numpy as np_mock
-                    with patch("src.layer0.ocr_extractor.np", create=True):
+                    with patch("na0s.layer0.ocr_extractor.np", create=True):
                         pass
 
                     result = ocr_extractor.extract_text_from_image(png_bytes)
@@ -254,7 +254,7 @@ class TestMockedEasyOCR(unittest.TestCase):
 
     def test_easyocr_fallback_to_tesseract(self):
         """When EasyOCR fails, falls back to Tesseract."""
-        from src.layer0 import ocr_extractor
+        from na0s.layer0 import ocr_extractor
 
         if not ocr_extractor._HAS_PIL:
             self.skipTest("Pillow not installed")
@@ -295,7 +295,7 @@ class TestPILImageLoading(unittest.TestCase):
 
     def test_valid_png_loads(self):
         """A real minimal PNG should load without error."""
-        from src.layer0 import ocr_extractor
+        from na0s.layer0 import ocr_extractor
 
         if not ocr_extractor._HAS_PIL:
             self.skipTest("Pillow not installed")
@@ -311,7 +311,7 @@ class TestPILImageLoading(unittest.TestCase):
 
     def test_corrupt_image_returns_warning(self):
         """Corrupt image data returns a warning, not an exception."""
-        from src.layer0 import ocr_extractor
+        from na0s.layer0 import ocr_extractor
 
         if not ocr_extractor._HAS_PIL:
             self.skipTest("Pillow not installed")

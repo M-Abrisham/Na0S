@@ -2,10 +2,9 @@ import os
 import sys
 import unittest
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from layer0.validation import validate_input, MAX_INPUT_LENGTH, MAX_INPUT_BYTES
-from layer0 import layer0_sanitize
+from na0s.layer0.validation import validate_input, MAX_INPUT_LENGTH, MAX_INPUT_BYTES
+from na0s.layer0 import layer0_sanitize
 
 
 class TestCharLimit(unittest.TestCase):
@@ -44,7 +43,7 @@ class TestByteLimit(unittest.TestCase):
 
     def test_byte_limit_with_emoji(self):
         # Temporarily raise char limit so byte limit is the binding constraint
-        import layer0.validation as v
+        import na0s.layer0.validation as v
         orig = v.MAX_INPUT_LENGTH
         try:
             v.MAX_INPUT_LENGTH = 999_999
@@ -59,7 +58,7 @@ class TestByteLimit(unittest.TestCase):
             v.MAX_INPUT_LENGTH = orig
 
     def test_byte_limit_with_cjk(self):
-        import layer0.validation as v
+        import na0s.layer0.validation as v
         orig = v.MAX_INPUT_LENGTH
         try:
             v.MAX_INPUT_LENGTH = 999_999
@@ -74,7 +73,7 @@ class TestByteLimit(unittest.TestCase):
             v.MAX_INPUT_LENGTH = orig
 
     def test_under_byte_limit_passes(self):
-        import layer0.validation as v
+        import na0s.layer0.validation as v
         orig = v.MAX_INPUT_LENGTH
         try:
             v.MAX_INPUT_LENGTH = 999_999
@@ -194,8 +193,8 @@ class TestRawByteSizeGuard(unittest.TestCase):
         and the sanitizer's imported copy (read by the raw-byte guard)
         so the boundary condition is tested end-to-end.
         """
-        import layer0.validation as v
-        import layer0.sanitizer as s
+        import na0s.layer0.validation as v
+        import na0s.layer0.sanitizer as s
         orig_len = v.MAX_INPUT_LENGTH
         orig_bytes_v = v.MAX_INPUT_BYTES
         orig_bytes_s = s.MAX_INPUT_BYTES if hasattr(s, 'MAX_INPUT_BYTES') else None
@@ -203,13 +202,6 @@ class TestRawByteSizeGuard(unittest.TestCase):
             test_byte_limit = 3000
             v.MAX_INPUT_LENGTH = 999_999
             v.MAX_INPUT_BYTES = test_byte_limit
-            # Patch the sanitizer's imported copy used by the raw-byte guard
-            from layer0 import sanitizer as s2
-            # The raw-byte guard imports MAX_INPUT_BYTES inside the function;
-            # patching validation.MAX_INPUT_BYTES is sufficient for
-            # validate_input, but the sanitizer re-imports it at line 359.
-            # We need to ensure the sanitizer's local import also picks up
-            # the patched value (it does a lazy import inside the function).
 
             # Build UTF-8 bytes that are exactly test_byte_limit
             # \xe4\xb8\x80 = U+4E00 (CJK "one"), 3 bytes per char
