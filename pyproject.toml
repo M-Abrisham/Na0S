@@ -27,12 +27,28 @@ classifiers = [
 ]
 keywords = ["prompt-injection", "llm", "security", "ai-safety", "guardrails"]
 
+# ---------------------------------------------------------------------------
+# Dependency version policy  (last audited: 2026-02-17)
+#
+# Each dependency has a minimum version floor (security / correctness) and
+# a major-version upper bound (<N) to prevent surprise breaking changes.
+#
+# Dependency        | Min   | Why min                                   | Upper
+# ------------------|-------|-------------------------------------------|------
+# scikit-learn      | 1.3   | API stability (set_output, ONNX compat)   | <2
+# numpy             | 1.24  | numpy.typing, Python 3.9+ wheels          | <3
+# tiktoken          | 0.5   | cl100k_base encoding for GPT-4            | <1
+# chardet           | 5.0   | performance rewrite, Python 3.10+ support | <6
+# ftfy              | 6.2   | CRITICAL: 6.2 fixes #202 (en-dash +       | <7
+#                   |       |   mojibake producing wrong Cyrillic chars) |
+#                   |       |   Versions <6.2 are UNSAFE for Na0S.       |
+# ---------------------------------------------------------------------------
 dependencies = [
-    "scikit-learn>=1.3",
-    "numpy>=1.24",
-    "tiktoken>=0.5",
-    "chardet>=5.0",
-    "ftfy>=6.0",
+    "scikit-learn>=1.3,<2",
+    "numpy>=1.24,<3",
+    "tiktoken>=0.5,<1",
+    "chardet>=5.0,<6",
+    "ftfy>=6.2,<7",
 ]
 
 [project.optional-dependencies]
