@@ -205,7 +205,7 @@ python -m pytest tests/ -v
 <summary><strong>Development install (contributors)</strong></summary>
 
 ```bash
-git clone https://github.com/mehrnoosh-a/Na0S.git
+git clone https://github.com/M-Abrisham/Na0S.git
 cd Na0S
 pip install -e ".[dev,all]"
 python -m pytest tests/ -v

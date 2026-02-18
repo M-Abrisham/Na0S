@@ -81,8 +81,8 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/mehrnoosh-a/Na0S"
-Issues = "https://github.com/mehrnoosh-a/Na0S/issues"
+Repository = "https://github.com/M-Abrisham/Na0S"
+Issues = "https://github.com/M-Abrisham/Na0S/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
