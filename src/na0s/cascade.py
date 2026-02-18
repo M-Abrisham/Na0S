@@ -15,7 +15,7 @@ genuinely malicious inputs.
 import re
 
 from .safe_pickle import safe_load
-from .rules import rule_score, rule_score_detailed
+from .rules import rule_score, rule_score_detailed, RULES, SEVERITY_WEIGHTS as _RULES_SEVERITY_WEIGHTS
 from .obfuscation import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
@@ -105,9 +105,12 @@ class WhitelistFilter:
         check_safety=True,
     )
 
-    ROLE_ASSIGNMENT = safe_compile(
-        r"you are now|from now on|new role|act as if you are",
-        re.IGNORECASE,
+    # FIX-6: Unified with rules.py roleplay pattern — no divergent copy.
+    # Look up the compiled pattern from the canonical RULES list.
+    ROLE_ASSIGNMENT = next(
+        (r._compiled for r in RULES if r.name == "roleplay"),
+        safe_compile(r"\byou are now\b|\bpretend to be\b|\bact as\b"
+                     r"|\bfrom now on\b|\bnew role\b", re.IGNORECASE),
     )
 
     SAFE_TOPIC_INDICATORS = safe_compile(
@@ -191,11 +194,8 @@ class WeightedClassifier:
     contributes a weighted score that must exceed a configurable threshold.
     """
 
-    SEVERITY_WEIGHTS = {
-        "critical": 0.3,
-        "high": 0.2,
-        "medium": 0.1,
-    }
+    # Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
+    SEVERITY_WEIGHTS = _RULES_SEVERITY_WEIGHTS
 
     ML_WEIGHT = 0.6
     OBFUSCATION_WEIGHT_PER_FLAG = 0.15
@@ -205,12 +205,23 @@ class WeightedClassifier:
     def __init__(self, threshold=None):
         self.threshold = threshold if threshold is not None else self.DEFAULT_THRESHOLD
 
-    def classify(self, text, vectorizer, model):
+    def classify(self, text, vectorizer, model, raw_text=None):
         """Return (label, confidence, hits).
 
         label: 'SAFE' or 'MALICIOUS'
         confidence: composite score in [0, 1]
         hits: list of matched rule/obfuscation flag names
+
+        Parameters
+        ----------
+        text : str
+            L0-sanitized text for ML and rule evaluation.
+        vectorizer, model : sklearn objects
+            TF-IDF vectorizer and classifier model.
+        raw_text : str or None
+            Original raw text before L0 sanitization.  When provided and
+            different from *text*, rules also run on raw_text to catch
+            payloads visible only before normalization (FIX-5).
         """
         # --- ML prediction ---
         X = vectorizer.transform([text])
@@ -223,7 +234,14 @@ class WeightedClassifier:
             ml_prob = proba[0] if prediction == 1 else 1.0 - proba[0]
 
         # --- Rule hits ---
+        # FIX-5: Run rules on sanitized text AND raw text (if different).
         detailed_hits = rule_score_detailed(text)
+        hit_names_seen = {h.name for h in detailed_hits}
+        if raw_text is not None and raw_text != text:
+            for rh in rule_score_detailed(raw_text):
+                if rh.name not in hit_names_seen:
+                    detailed_hits.append(rh)
+                    hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
         rule_weight = 0.0
@@ -432,9 +450,10 @@ class CascadeClassifier:
             return "SAFE", 0.99, [], "whitelist"
 
         # Stage 2: weighted classifier (operates on sanitized text)
+        # FIX-5: Pass raw text so rules also run on pre-normalization input
         self._ensure_model()
         label, confidence, hits = self._weighted.classify(
-            clean, self._vectorizer, self._model,
+            clean, self._vectorizer, self._model, raw_text=text,
         )
         self._classified += 1
 

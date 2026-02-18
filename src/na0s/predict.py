@@ -7,7 +7,7 @@ from .layer0.timeout import (
     with_timeout,
 )
 from .obfuscation import obfuscation_scan
-from .rules import rule_score, rule_score_detailed, RULES
+from .rules import rule_score, rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load
 from .models import get_model_path
@@ -23,12 +23,8 @@ MODEL_PATH = get_model_path("model.pkl")
 VECTORIZER_PATH = get_model_path("tfidf_vectorizer.pkl")
 DECISION_THRESHOLD = 0.55
 
-# Severity-to-weight mapping for rule hits in weighted voting
-_SEVERITY_WEIGHTS = {
-    "critical": 0.3,
-    "high": 0.2,
-    "medium": 0.1,
-}
+# Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
+_SEVERITY_WEIGHTS = SEVERITY_WEIGHTS
 
 # Build a lookup from rule name -> severity for quick access
 _RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
@@ -199,7 +195,18 @@ def classify_prompt(text, vectorizer, model):
         return label, prob, [], l0
 
     clean = l0.sanitized_text
-    hits = rule_score(clean)
+
+    # FIX-5: Run rules on sanitized text AND raw text (if different) to
+    # catch payloads visible only after normalization (e.g., homoglyphs)
+    # as well as payloads visible only in the raw form.  Deduplicate hits.
+    detailed_hits = rule_score_detailed(clean)
+    hit_names_seen = {h.name for h in detailed_hits}
+    if text != clean:
+        for rh in rule_score_detailed(text):
+            if rh.name not in hit_names_seen:
+                detailed_hits.append(rh)
+                hit_names_seen.add(rh.name)
+    hits = [h.name for h in detailed_hits]
 
     # Layer 3: Structural Features — extract non-lexical signals
     structural = None
@@ -306,11 +313,15 @@ def scan(text, vectorizer=None, model=None):
         except Exception:
             structural = None
 
-    # Collect technique_tags from rule hits and L0 anomaly flags
+    # Collect technique_tags from rule hits and L0 anomaly flags.
+    # Derive technique_ids from the hits list returned by classify_prompt()
+    # instead of re-running rule_score_detailed() (FIX-2: single-pass).
+    _RULE_TECHNIQUE_IDS = {rule.name: rule.technique_ids for rule in RULES}
     technique_tags = []
-    detailed_hits = rule_score_detailed(l0.sanitized_text)
-    for rh in detailed_hits:
-        technique_tags.extend(rh.technique_ids)
+    for hit_name in hits:
+        for tid in _RULE_TECHNIQUE_IDS.get(hit_name, []):
+            if tid not in technique_tags:
+                technique_tags.append(tid)
 
     # Chunked analysis for long inputs -- detect buried payloads
     word_count = len(l0.sanitized_text.split())
@@ -320,16 +331,14 @@ def scan(text, vectorizer=None, model=None):
 
         chunk_hits_set = set()
         chunk_technique_tags = []
-        # Analyse HEAD+TAIL extract
-        ht_hits = rule_score(ht_text)
-        chunk_hits_set.update(ht_hits)
+        # Analyse HEAD+TAIL extract (single-pass via rule_score_detailed)
         for rh in rule_score_detailed(ht_text):
+            chunk_hits_set.add(rh.name)
             chunk_technique_tags.extend(rh.technique_ids)
-        # Analyse each chunk
+        # Analyse each chunk (single-pass via rule_score_detailed)
         for chunk in chunks:
-            c_hits = rule_score(chunk)
-            chunk_hits_set.update(c_hits)
             for rh in rule_score_detailed(chunk):
+                chunk_hits_set.add(rh.name)
                 chunk_technique_tags.extend(rh.technique_ids)
 
         # Merge new discoveries into main lists
