@@ -97,15 +97,17 @@ def detect_language(text):
     if not text or not text.strip():
         return result
 
-    # --- Guard: langdetect not available ---
-    if not _HAS_LANGDETECT:
-        return result
-
     # --- Guard: text too short for reliable detection ---
+    # Script-based heuristic works without langdetect, so check BEFORE
+    # the langdetect availability guard.
     stripped = text.strip()
     if len(stripped) < _MIN_CHARS_FOR_DETECTION:
         # Even for short text, use script heuristic for non-Latin detection
         return _heuristic_detect(stripped)
+
+    # --- Guard: langdetect not available ---
+    if not _HAS_LANGDETECT:
+        return result
 
     # --- Primary detection via langdetect ---
     try:

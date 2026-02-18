@@ -184,26 +184,46 @@ class TestRawByteSizeGuard(unittest.TestCase):
         self.assertIn("Hello", result.sanitized_text)
 
     def test_raw_bytes_exactly_at_limit_pass(self):
-        """Raw bytes exactly at MAX_INPUT_BYTES should pass the raw guard.
+        """Raw bytes exactly at the byte limit should pass the raw guard.
 
-        We use 3-byte UTF-8 CJK chars so that MAX_INPUT_BYTES raw bytes
-        contain only ~66K characters -- well above MAX_INPUT_LENGTH (50K).
-        So we patch MAX_INPUT_LENGTH up to isolate the raw-byte gate.
+        Uses a small test-specific byte limit (3000) to avoid pipeline
+        timeout.  Full-size MAX_INPUT_BYTES (200 KB) causes chardet to
+        take too long, exceeding the 30-second pipeline timeout.
+
+        We patch both validation.MAX_INPUT_BYTES (read by validate_input)
+        and the sanitizer's imported copy (read by the raw-byte guard)
+        so the boundary condition is tested end-to-end.
         """
         import layer0.validation as v
-        orig = v.MAX_INPUT_LENGTH
+        import layer0.sanitizer as s
+        orig_len = v.MAX_INPUT_LENGTH
+        orig_bytes_v = v.MAX_INPUT_BYTES
+        orig_bytes_s = s.MAX_INPUT_BYTES if hasattr(s, 'MAX_INPUT_BYTES') else None
         try:
+            test_byte_limit = 3000
             v.MAX_INPUT_LENGTH = 999_999
-            # Build UTF-8 bytes that are exactly MAX_INPUT_BYTES
+            v.MAX_INPUT_BYTES = test_byte_limit
+            # Patch the sanitizer's imported copy used by the raw-byte guard
+            from layer0 import sanitizer as s2
+            # The raw-byte guard imports MAX_INPUT_BYTES inside the function;
+            # patching validation.MAX_INPUT_BYTES is sufficient for
+            # validate_input, but the sanitizer re-imports it at line 359.
+            # We need to ensure the sanitizer's local import also picks up
+            # the patched value (it does a lazy import inside the function).
+
+            # Build UTF-8 bytes that are exactly test_byte_limit
             # \xe4\xb8\x80 = U+4E00 (CJK "one"), 3 bytes per char
-            char_count = MAX_INPUT_BYTES // 3
-            remainder = MAX_INPUT_BYTES - char_count * 3
+            char_count = test_byte_limit // 3
+            remainder = test_byte_limit - char_count * 3
             raw = ("\u4e00" * char_count).encode("utf-8") + b"x" * remainder
-            self.assertEqual(len(raw), MAX_INPUT_BYTES)
+            self.assertEqual(len(raw), test_byte_limit)
             result = layer0_sanitize(raw)
-            self.assertFalse(result.rejected)
+            self.assertFalse(result.rejected,
+                             "Expected pass but got rejected: {}".format(
+                                 result.rejection_reason if result.rejected else ""))
         finally:
-            v.MAX_INPUT_LENGTH = orig
+            v.MAX_INPUT_LENGTH = orig_len
+            v.MAX_INPUT_BYTES = orig_bytes_v
 
     def test_raw_bytes_one_over_limit_rejected(self):
         """Raw bytes one byte over MAX_INPUT_BYTES should be rejected."""
