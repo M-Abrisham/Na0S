@@ -590,6 +590,14 @@ def scan(text, vectorizer=None, model=None):
         # normalization.py — ftfy flags
         "mojibake_repaired": "D5",
         "ftfy_suspicious_correction": "D5",
+        # resource_guard.py — resource exhaustion protection
+        "resource_guard_input_size": "R1",
+        "resource_guard_html_depth": "R1",
+        "resource_guard_nesting_depth": "R1",
+        "resource_guard_repetition": "R1.1",
+        "resource_guard_expansion_ratio": "R1",
+        "resource_guard_memory_cap": "R1",
+        "resource_guard_rate_limit": "R1",
     }
     for flag in list(l0.anomaly_flags) + hits:
         mapped = _L0_FLAG_MAP.get(flag)

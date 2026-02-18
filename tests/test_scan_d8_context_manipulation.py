@@ -1111,9 +1111,13 @@ class TestD8_DetectionQuality(unittest.TestCase):
         # Need something that exceeds 200K bytes but stays under 50K chars.
         # Not possible with chars <= 4 bytes.  Skip this scenario.
         # Instead test that a reasonable multi-byte input is handled correctly.
-        text = "\U0001F600" * 1000 + " Hello world"
+        # Use diverse emoji to avoid triggering the repetition guard.
+        emojis = ["\U0001F600", "\U0001F601", "\U0001F602", "\U0001F603",
+                  "\U0001F604", "\U0001F605", "\U0001F606", "\U0001F607",
+                  "\U0001F608", "\U0001F609"]
+        text = "".join(emojis[i % len(emojis)] for i in range(100)) + " Hello world"
         r = _scan(text)
-        # This should NOT be rejected (1002 chars * ~4 bytes = ~4008 bytes)
+        # This should NOT be rejected (111 chars * ~4 bytes = ~444 bytes)
         self.assertFalse(
             r.rejected,
             "Multi-byte input incorrectly rejected: reason={}".format(

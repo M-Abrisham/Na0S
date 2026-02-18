@@ -33,6 +33,11 @@ from .timeout import (
 )
 from .unicode_stego import detect_unicode_stego
 from .entropy_check import composite_entropy_check
+from .resource_guard import (
+    ResourceLimitExceeded,
+    run_entry_guards,
+    check_expansion_ratio,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -387,6 +392,21 @@ def _layer0_sanitize_inner(raw_input):
 
     original_length = len(raw_input)
 
+    # Step 1a: Resource guards — reject inputs that would exhaust
+    # memory, CPU, or hit rate limits before any heavy processing.
+    try:
+        run_entry_guards(raw_input)
+    except ResourceLimitExceeded as exc:
+        _logger.warning("Resource guard '%s': %s", exc.guard_name, exc.detail)
+        all_flags.append("resource_guard_{}".format(exc.guard_name))
+        return Layer0Result(
+            rejected=True,
+            rejection_reason=str(exc),
+            original_length=original_length,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
+
     # Step 1b: Unicode steganography detection (tag chars + variation selectors)
     # MUST run BEFORE normalization because strip_invisible_chars() removes
     # tag characters (category Cf) which would destroy the hidden payload
@@ -421,6 +441,22 @@ def _layer0_sanitize_inner(raw_input):
             source_metadata=source_metadata,
         )
     all_flags.extend(norm_flags)
+
+    # Step 2b: Post-normalization expansion ratio check — catch zip-bomb
+    # style Unicode normalization expansion (e.g. NFKC compatibility
+    # decomposition of ligatures or CJK compatibility ideographs).
+    try:
+        check_expansion_ratio(original_length, len(text))
+    except ResourceLimitExceeded as exc:
+        _logger.warning("Resource guard '%s': %s", exc.guard_name, exc.detail)
+        all_flags.append("resource_guard_{}".format(exc.guard_name))
+        return Layer0Result(
+            rejected=True,
+            rejection_reason=str(exc),
+            original_length=original_length,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
 
     # Post-normalization empty check — all-invisible input passes validate_input()
     # but becomes empty after stripping. Reject it here.

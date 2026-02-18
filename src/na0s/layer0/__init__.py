@@ -10,3 +10,10 @@ from .ocr_extractor import extract_image_metadata, ImageMetadataResult
 from .timeout import Layer0TimeoutError, with_timeout
 from .unicode_stego import detect_unicode_stego, StegoResult
 from .entropy_check import composite_entropy_check, EntropyCheckResult
+from .resource_guard import (
+    ResourceLimitExceeded,
+    run_entry_guards,
+    check_expansion_ratio,
+    check_nesting_depth,
+    check_repetition_ratio,
+)

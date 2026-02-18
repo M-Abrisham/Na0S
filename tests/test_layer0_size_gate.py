@@ -122,7 +122,7 @@ class TestSizeGateInPipeline(unittest.TestCase):
         self.assertGreater(len(result.sanitized_text), 0)
 
     def test_large_but_under_limit_passes_pipeline(self):
-        # 40K chars — large but valid, should pass through
+        # 40K chars — large but valid, should pass through.
         text = "The quick brown fox jumps over the lazy dog. " * 900
         self.assertLessEqual(len(text), MAX_INPUT_LENGTH)
         result = layer0_sanitize(text)
@@ -204,10 +204,14 @@ class TestRawByteSizeGuard(unittest.TestCase):
             v.MAX_INPUT_BYTES = test_byte_limit
 
             # Build UTF-8 bytes that are exactly test_byte_limit
-            # \xe4\xb8\x80 = U+4E00 (CJK "one"), 3 bytes per char
+            # Use diverse CJK characters (U+4E00..U+9FFF) to avoid
+            # triggering the repetition guard.  Each CJK char is 3 bytes.
             char_count = test_byte_limit // 3
             remainder = test_byte_limit - char_count * 3
-            raw = ("\u4e00" * char_count).encode("utf-8") + b"x" * remainder
+            cjk_chars = "".join(
+                chr(0x4E00 + (i % 0x51FF)) for i in range(char_count)
+            )
+            raw = cjk_chars.encode("utf-8") + b"x" * remainder
             self.assertEqual(len(raw), test_byte_limit)
             result = layer0_sanitize(raw)
             self.assertFalse(result.rejected,

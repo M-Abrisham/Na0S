@@ -3,9 +3,11 @@
 Guards against:
     - Oversized input (char + byte limits, extends validation.py)
     - Deep HTML nesting (limits parser recursion depth)
+    - Structural nesting depth (JSON/bracket depth scanning)
+    - Repetition-based padding / prompt stuffing
     - Expansion-ratio attacks (zip-bomb style normalization output)
     - Memory cap enforcement (reject if input would exceed budget)
-    - Optional per-caller rate limiting (token-bucket, disabled by default)
+    - Optional per-caller rate limiting (sliding-window, disabled by default)
 
 All limits are configurable via environment variables with sensible defaults.
 
@@ -14,6 +16,8 @@ Environment variables
 L0_MAX_INPUT_CHARS           Max character count.            Default: 50000
 L0_MAX_INPUT_BYTES           Max byte count (UTF-8).         Default: 200000
 L0_MAX_HTML_DEPTH            Max HTML nesting depth.         Default: 100
+L0_MAX_BRACKET_DEPTH         Max bracket nesting depth.      Default: 100
+L0_MAX_REPETITION_RATIO      Max trigram repetition ratio.   Default: 0.95
 L0_MAX_EXPANSION_RATIO       Max output/input length ratio.  Default: 10.0
 L0_MEMORY_CAP_MB             Max memory budget (MB).         Default: 50
 L0_RATE_LIMIT_ENABLED        Enable rate limiting.           Default: 0 (off)
@@ -34,6 +38,8 @@ from html.parser import HTMLParser
 MAX_INPUT_CHARS = int(os.getenv("L0_MAX_INPUT_CHARS", "50000"))
 MAX_INPUT_BYTES = int(os.getenv("L0_MAX_INPUT_BYTES", "200000"))
 MAX_HTML_DEPTH = int(os.getenv("L0_MAX_HTML_DEPTH", "100"))
+MAX_BRACKET_DEPTH = int(os.getenv("L0_MAX_BRACKET_DEPTH", "100"))
+MAX_REPETITION_RATIO = float(os.getenv("L0_MAX_REPETITION_RATIO", "0.95"))
 MAX_EXPANSION_RATIO = float(os.getenv("L0_MAX_EXPANSION_RATIO", "10.0"))
 MEMORY_CAP_MB = float(os.getenv("L0_MEMORY_CAP_MB", "50"))
 RATE_LIMIT_ENABLED = os.getenv("L0_RATE_LIMIT_ENABLED", "0") == "1"
@@ -161,6 +167,105 @@ def check_expansion_ratio(
 
 
 # ---------------------------------------------------------------------------
+# Structural nesting depth guard
+# ---------------------------------------------------------------------------
+def check_nesting_depth(text: str, max_depth: int = None) -> None:
+    """Reject input with excessive bracket/brace nesting depth.
+
+    Uses iterative character scanning (O(n), no recursion) to measure
+    nesting depth of ``{}``, ``[]``, and ``()`` structures.  String
+    literals delimited by ``"`` are skipped so that brackets inside
+    JSON string values are not counted.
+
+    Prevents stack-overflow attacks against downstream JSON/XML parsers
+    (see CPython issue #56226, CVE-2024-27454).
+
+    Raises ResourceLimitExceeded on violation.
+    """
+    if max_depth is None:
+        max_depth = MAX_BRACKET_DEPTH
+
+    if max_depth <= 0:
+        return
+
+    max_seen = 0
+    current = 0
+    in_string = False
+    escape_next = False
+
+    for ch in text:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ("{", "[", "("):
+            current += 1
+            if current > max_seen:
+                max_seen = current
+        elif ch in ("}", "]", ")"):
+            current = max(0, current - 1)
+
+    if max_seen > max_depth:
+        raise ResourceLimitExceeded(
+            "nesting_depth",
+            "structural nesting depth {} exceeds limit {}".format(
+                max_seen, max_depth
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Repetition ratio guard (prompt-stuffing detection)
+# ---------------------------------------------------------------------------
+def check_repetition_ratio(
+    text: str, max_ratio: float = None, min_length: int = 100
+) -> None:
+    """Reject highly repetitive input (prompt stuffing / padding attacks).
+
+    Computes the fraction of duplicate character trigrams on a fixed-size
+    window (first 500 characters).  Using a window avoids false positives
+    on large legitimate text, where the bounded trigram space naturally
+    causes high duplicate ratios.  A ratio above *max_ratio* (default
+    0.95 = 95% duplicate trigrams) indicates the input is almost entirely
+    repetitive padding.
+
+    Raises ResourceLimitExceeded on violation.
+    """
+    if max_ratio is None:
+        max_ratio = MAX_REPETITION_RATIO
+
+    if len(text) < min_length:
+        return
+
+    # Use a fixed-size window to avoid false positives on large text.
+    # 500 chars is enough to detect padding attacks while keeping the
+    # trigram space small enough for meaningful ratio measurement.
+    sample = text[:500]
+
+    trigrams = [sample[i:i + 3] for i in range(len(sample) - 2)]
+    if not trigrams:
+        return
+
+    unique = len(set(trigrams))
+    ratio = 1.0 - (unique / len(trigrams))
+
+    if ratio > max_ratio:
+        raise ResourceLimitExceeded(
+            "repetition",
+            "input is {:.0f}% repetitive (limit: {:.0f}%)".format(
+                ratio * 100, max_ratio * 100
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Memory cap guard
 # ---------------------------------------------------------------------------
 def check_memory_budget(text: str, cap_mb: float = None) -> None:
@@ -246,6 +351,25 @@ class RateLimiter:
             timestamps.append(now)
             self._windows[caller_id] = timestamps
 
+            # Periodic cleanup: remove stale callers every 100 checks
+            # to prevent unbounded growth of _windows dict.
+            total = sum(len(v) for v in self._windows.values())
+            if total > 500 or len(self._windows) > 200:
+                self._cleanup_stale(cutoff)
+
+
+    def _cleanup_stale(self, cutoff: float) -> None:
+        """Remove caller entries with no activity since *cutoff*.
+
+        Must be called while holding ``self._lock``.
+        """
+        stale = [
+            k for k, v in self._windows.items()
+            if not v or max(v) < cutoff
+        ]
+        for k in stale:
+            del self._windows[k]
+
 
 # Module-level singleton rate limiter
 _rate_limiter = RateLimiter()
@@ -264,8 +388,18 @@ def run_entry_guards(text: str, caller_id: str = "default") -> None:
 
     Call this at the top of ``layer0_sanitize()`` before any processing.
     Raises ResourceLimitExceeded on any violation.
+
+    Guard order:
+        1. Rate limit (per-caller sliding window)
+        2. Input size (char + byte limits)
+        3. Memory budget (estimated processing memory)
+        4. Structural nesting depth (bracket/brace depth)
+        5. Repetition ratio (prompt-stuffing detection)
+        6. HTML nesting depth
     """
     check_rate_limit(caller_id)
     check_input_size(text)
     check_memory_budget(text)
+    check_nesting_depth(text)
+    check_repetition_ratio(text)
     check_html_depth(text)
