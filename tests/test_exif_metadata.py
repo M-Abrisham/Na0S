@@ -360,7 +360,7 @@ class TestEXIFExtraction(unittest.TestCase):
 
     @_patch_pil_image
     def test_exif_xp_subject(self, mock_Image):
-        """Extract text from EXIF XPSubject (tag 40093)."""
+        """Extract text from EXIF XPAuthor (tag 40093, was incorrectly XPSubject)."""
         text = "Subject payload"
         value = text.encode("utf-16le") + b"\x00\x00"
         mock_img = _mock_pil_image({40093: value})
@@ -369,7 +369,7 @@ class TestEXIFExtraction(unittest.TestCase):
         result = extract_image_metadata(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
         self.assertTrue(result.has_metadata_text)
         self.assertIn("Subject payload", result.metadata_text)
-        self.assertIn("exif:XPSubject", result.metadata_fields)
+        self.assertIn("exif:XPAuthor", result.metadata_fields)
 
     @_patch_pil_image
     def test_exif_multiple_tags(self, mock_Image):
@@ -480,7 +480,7 @@ class TestExifTagConstants(unittest.TestCase):
 
     def test_xp_subject_tag(self):
         self.assertIn(40093, _EXIF_TEXT_TAGS)
-        self.assertEqual(_EXIF_TEXT_TAGS[40093], "XPSubject")
+        self.assertEqual(_EXIF_TEXT_TAGS[40093], "XPAuthor")
 
 
 # ===================================================================

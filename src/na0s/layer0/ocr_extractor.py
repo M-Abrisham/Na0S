@@ -118,13 +118,23 @@ class ImageMetadataResult:
 # EXIF tag IDs of interest (text-carrying tags)
 # ---------------------------------------------------------------------------
 
-#: EXIF tag ID -> human-readable name
+#: EXIF tag ID -> human-readable name.
+#: All text-carrying tags that could hide prompt injection payloads.
 _EXIF_TEXT_TAGS: dict[int, str] = {
+    # IFD0 standard text tags
+    269: "DocumentName",
     270: "ImageDescription",
+    305: "Software",
+    315: "Artist",
+    33432: "Copyright",
+    # ExifIFD
     37510: "UserComment",
+    # Windows XP tags (UTF-16LE encoded)
     40091: "XPTitle",
     40092: "XPComment",
-    40093: "XPSubject",
+    40093: "XPAuthor",     # was incorrectly mapped as XPSubject
+    40094: "XPKeywords",
+    40095: "XPSubject",
 }
 
 #: Regex to find XMP metadata blocks in raw bytes.
