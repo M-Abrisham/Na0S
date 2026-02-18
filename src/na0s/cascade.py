@@ -15,10 +15,12 @@ genuinely malicious inputs.
 import re
 
 from .safe_pickle import safe_load
+from .predict import _get_cached_models
 from .rules import rule_score, rule_score_detailed, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .obfuscation import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
+from .scan_result import ScanResult
 from .models import get_model_path
 
 # Layer 5: Embedding-based classifier — optional import
@@ -348,6 +350,10 @@ class CascadeClassifier:
             except Exception:
                 self._canary_manager = None
 
+        # Last L0 result from classify() — reused by classify_for_evaluate()
+        # to avoid running layer0_sanitize() twice on the same input.
+        self._last_l0 = None
+
         # Stats counters
         self._total = 0
         self._whitelisted = 0
@@ -361,10 +367,14 @@ class CascadeClassifier:
         self._canary_checks = 0
 
     def _ensure_model(self):
-        """Lazy-load model and vectorizer on first use."""
+        """Lazy-load model and vectorizer on first use.
+
+        Delegates to the shared thread-safe cache in predict.py so that
+        both scan() and CascadeClassifier share a single set of loaded
+        model objects, avoiding redundant disk I/O + SHA-256 verification.
+        """
         if self._vectorizer is None or self._model is None:
-            self._vectorizer = safe_load(VECTORIZER_PATH)
-            self._model = safe_load(MODEL_PATH)
+            self._vectorizer, self._model = _get_cached_models()
 
     def _ensure_embedding_model(self):
         """Lazy-load embedding model and classifier on first use."""
@@ -413,6 +423,7 @@ class CascadeClassifier:
 
         # Layer 0: sanitize input before anything else
         l0 = layer0_sanitize(text)
+        self._last_l0 = l0  # cache for classify_for_evaluate()
         if l0.rejected:
             self._blocked += 1
             return "BLOCKED", 1.0, l0.anomaly_flags, "blocked"
@@ -554,6 +565,93 @@ class CascadeClassifier:
         return label, confidence, hits, "weighted"
 
     # ------------------------------------------------------------------
+    # Unified scan() — returns ScanResult (same shape as predict.scan())
+    # ------------------------------------------------------------------
+
+    def scan(self, text):
+        """Run the cascade and return a structured :class:`ScanResult`.
+
+        This mirrors the :func:`na0s.predict.scan` API so that users can
+        swap between the simple pipeline and the cascade without
+        rewriting calling code::
+
+            # Simple pipeline
+            from na0s import scan
+            result = scan("some input")
+
+            # Cascade pipeline — same ScanResult type
+            from na0s import CascadeClassifier
+            clf = CascadeClassifier()
+            result = clf.scan("some input")
+
+        The returned ``ScanResult.cascade_stage`` field indicates which
+        stage of the cascade made the final decision (e.g. ``"whitelist"``,
+        ``"weighted"``, ``"judge"``).
+
+        Parameters
+        ----------
+        text : str
+            The input text to classify.
+
+        Returns
+        -------
+        ScanResult
+        """
+        label, confidence, hits, stage = self.classify(text)
+
+        # Retrieve the L0 result cached by classify()
+        l0 = self._last_l0
+
+        is_blocked = label == "BLOCKED"
+        is_mal = label == "MALICIOUS"
+
+        if is_blocked:
+            return ScanResult(
+                sanitized_text="",
+                is_malicious=True,
+                risk_score=1.0,
+                label="blocked",
+                rejected=True,
+                rejection_reason=l0.rejection_reason if l0 else "blocked",
+                anomaly_flags=l0.anomaly_flags if l0 else [],
+                ml_confidence=confidence,
+                ml_label="blocked",
+                cascade_stage=stage,
+            )
+
+        # Derive technique_tags from the detailed rule hits available
+        # on the sanitized text.  We run rule_score_detailed here to
+        # get technique_ids — the overhead is minimal because most of
+        # the heavy work was already done inside classify().
+        technique_tags = []
+        if l0 is not None and not l0.rejected:
+            from .rules import rule_score_detailed as _rsd
+            detailed = _rsd(l0.sanitized_text)
+            for rh in detailed:
+                for tid in rh.technique_ids:
+                    if tid not in technique_tags:
+                        technique_tags.append(tid)
+
+        # Include the cascade stage as a technique tag so it appears
+        # in downstream telemetry / logging alongside MITRE-style IDs.
+        stage_tag = "cascade:{}".format(stage)
+        if stage_tag not in technique_tags:
+            technique_tags.append(stage_tag)
+
+        return ScanResult(
+            sanitized_text=l0.sanitized_text if l0 else "",
+            is_malicious=is_mal,
+            risk_score=round(confidence, 4),
+            label="malicious" if is_mal else "safe",
+            technique_tags=technique_tags,
+            rule_hits=hits,
+            ml_confidence=round(confidence, 4),
+            ml_label="malicious" if is_mal else "safe",
+            anomaly_flags=l0.anomaly_flags if l0 else [],
+            cascade_stage=stage,
+        )
+
+    # ------------------------------------------------------------------
     # Layer 9: Output scanner — scan LLM output (post-processing)
     # ------------------------------------------------------------------
 
@@ -666,8 +764,9 @@ class CascadeClassifier:
         framework without modification.
         """
         label, confidence, hits, _stage = self.classify(text)
-        # Use real Layer 0 result for evaluation instead of a stub
-        l0 = layer0_sanitize(text)
+        # Reuse the Layer 0 result already computed inside classify()
+        # instead of running layer0_sanitize() a second time.
+        l0 = self._last_l0
         return label, confidence, hits, l0
 
     # --- Stats API ---

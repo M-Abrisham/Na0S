@@ -16,3 +16,7 @@ class ScanResult:
     anomaly_flags: list = field(default_factory=list)
     rejected: bool = False
     rejection_reason: str = ""
+    cascade_stage: str = ""        # which cascade stage decided: "whitelist",
+                                   # "weighted", "embedding", "judge",
+                                   # "positive_validation", "blocked", or ""
+                                   # (empty when produced by predict.scan())
