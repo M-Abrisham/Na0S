@@ -201,7 +201,8 @@ def predict(text, vectorizer, model):
     return label, prob, l0
 
 
-def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
+def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
+                       contextual_frame=False):
     """Combine ML confidence, rule severity, obfuscation, and structural
     features into a composite score.
 
@@ -219,6 +220,10 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
         Structural features dict from extract_structural_features().
         When provided, injection-signal features contribute additional
         weight to the composite score.
+    contextual_frame : bool
+        True when the text is in educational/question/quoting/code/narrative
+        framing.  Reduces ML weight to mitigate trigger-word bias
+        (InjecGuard: arxiv 2410.22770).
 
     Returns (label_str, composite_score).
     """
@@ -230,15 +235,27 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
     else:
         ml_prob_malicious = 1.0 - ml_prob  # low value when ML is confident-safe
 
-    ml_weight = 0.6 * ml_prob_malicious
-
     # --- Rule severity signal ---
+    # Exclude obfuscation flags (already accounted for in obf_weight) to
+    # avoid double-counting.
     rule_weight = 0.0
     severities_seen = set()
+    obs_flags_set = set(obs_flags) if obs_flags else set()
     for hit_name in hits:
+        if hit_name in obs_flags_set:
+            continue  # counted in obf_weight below
         sev = _RULE_SEVERITY.get(hit_name, "medium")
         severities_seen.add(sev)
         rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
+
+    # Context-aware ML weight: reduce from 0.6 to 0.4 when text is framed
+    # as educational/question/quoting/code/narrative AND no strong rules
+    # fire.  When active rule hits exist, the text IS suspicious and full
+    # ML weight is needed for detection.  (InjecGuard trigger-word bias
+    # mitigation without weakening direct attack detection.)
+    has_active_rules = rule_weight > 0
+    ml_coeff = 0.6 if (not contextual_frame or has_active_rules) else 0.4
+    ml_weight = ml_coeff * ml_prob_malicious
 
     # --- Obfuscation signal ---
     obf_weight = min(0.15 * len(obs_flags), 0.3)
@@ -268,6 +285,18 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
             structural_weight += 0.03
 
     composite = ml_weight + rule_weight + obf_weight + structural_weight
+
+    # --- High-precision rule boost ---
+    # Attack-specific rules with very low false-positive rates should
+    # guarantee detection regardless of ML score.  These rules survived
+    # contextual-frame suppression and have tight regex patterns.
+    _HIGH_PRECISION_RULES = frozenset({
+        "prompt_query", "credential_extraction", "pii_extraction",
+        "harmful_request", "training_data_extraction", "cross_session",
+        "authority_claim", "decoded_payload_malicious",
+    })
+    if any(h in _HIGH_PRECISION_RULES for h in hits if h not in obs_flags_set):
+        composite = max(composite, DECISION_THRESHOLD)
 
     # --- Override protection ---
     # If ML is confidently safe (>0.8), only medium rules fired, no
@@ -346,9 +375,14 @@ def classify_prompt(text, vectorizer, model):
     if decoded_malicious:
         hits.append("decoded_payload_malicious")
 
+    # Check contextual framing for trigger-word bias mitigation
+    from .rules import _has_contextual_framing
+    contextual_frame = _has_contextual_framing(clean)
+
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
-                                          structural=structural)
+                                          structural=structural,
+                                          contextual_frame=contextual_frame)
 
     # Auto-register to FingerprintStore when composite exceeds threshold
     # Use sanitized text so fingerprint lookups match post-normalization input

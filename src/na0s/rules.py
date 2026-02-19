@@ -60,10 +60,35 @@ RULES = [
          severity="critical",
          description="Explicit instruction override attempt"),
     Rule("system_prompt",
-         r"(reveal|show|print).{0,40}(system prompt|developer message)",
+         # Expanded: more verbs (display, repeat, copy, translate, list,
+         # output, dump, paste) and more targets (system message, hidden
+         # instructions, initial prompt, configuration, internal rules).
+         r"(?:reveal|show|print|display|repeat|copy|translate|list|output"
+         r"|dump|paste|rewrite|paraphrase|summarize|convert|encode"
+         r"|TL;?DR)\b"
+         r".{0,60}"
+         r"(?:system\s+prompt|developer\s+message|hidden\s+instructions?"
+         r"|initial\s+prompt|system\s+message|internal\s+(?:rules?|instructions?)"
+         r"|initial\s+configuration|initial\s+instructions?"
+         r"|system\s+instructions?|your\s+(?:instructions?|configuration"
+         r"|rules?|prompt))",
          technique_ids=["E1.1", "E1.2"],
          severity="high",
          description="System prompt extraction attempt"),
+    Rule("prompt_query",
+         # "What is your system prompt?" style extraction -- question-form
+         # probes that don't use imperative verbs.
+         r"\b(?:what\s+(?:is|are|do)|tell\s+me|(?:can|could)\s+you\s+"
+         r"(?:show|tell|give|share|reveal))\b"
+         r".{0,40}"
+         r"(?:your\s+(?:system\s+prompt|instructions?|rules?|configuration"
+         r"|constraints?|restrictions?|directives?|guidelines?|prompt"
+         r"|(?:internal|hidden)\s+\w+)"
+         r"|the\s+(?:system\s+prompt|developer\s+(?:message|instructions?)"
+         r"|hidden\s+(?:prompt|instructions?)))",
+         technique_ids=["E1.1"],
+         severity="high",
+         description="Question-form prompt extraction"),
     Rule("roleplay",
          ROLE_ASSIGNMENT_PATTERN,
          technique_ids=["D2.1", "D2.2"],
@@ -79,6 +104,74 @@ RULES = [
          technique_ids=["E1.1"],
          severity="high",
          description="Data exfiltration attempt"),
+    Rule("credential_extraction",
+         # API keys, secrets, env vars, passwords, tokens
+         r"(?:print|show|reveal|display|list|output|give\s+me|provide)"
+         r".{0,40}"
+         r"(?:(?:api|secret|access|auth)\s*(?:_|\s)?(?:keys?|tokens?)"
+         r"|environment\s+variables?"
+         r"|(?:OPENAI|AWS|AZURE|GCP|GITHUB|SLACK|DATABASE|DB)_\w+"
+         r"|(?:passwords?|credentials?|secrets?)\b)",
+         technique_ids=["P1.5", "E1.1"],
+         severity="high",
+         description="Credential/API key extraction attempt"),
+    Rule("cross_session",
+         # Previous user/session data extraction
+         r"(?:previous|last|other|earlier)\s+"
+         r"(?:user(?:'s)?|session(?:'s)?|conversation(?:'s)?|chat(?:'s)?)"
+         r".{0,30}"
+         r"(?:ask(?:ed)?|said|typed|sent|query|queries|data|message|input|request)",
+         technique_ids=["P1.4"],
+         severity="high",
+         description="Cross-session data extraction attempt"),
+    Rule("pii_extraction",
+         # Direct PII extraction requests
+         r"\b(?:list|show|extract|give\s+me|provide|collect)\b"
+         r".{0,40}"
+         r"\b(?:(?:all|every|the)\s+)?"
+         r"(?:email\s+addresses|phone\s+numbers?|social\s+security"
+         r"|credit\s+card|personal\s+(?:info|information|data|details)"
+         r"|private\s+(?:data|information|details)"
+         r"|user(?:'s)?\s+(?:data|information|details))\b",
+         technique_ids=["P1.2"],
+         severity="high",
+         description="PII extraction request"),
+    Rule("training_data_extraction",
+         # Training data / memory extraction via prefix completion or repetition.
+         # "verbatim" removed -- too broad; matches benign "repeat ... verbatim".
+         r"(?:recite|repeat|reproduce|emit|complete)\b.{0,40}"
+         r"(?:training\s+data|memorized|word\s+for\s+word)"
+         r"|repeat\s+the\s+word\b.{0,20}\bforever\b",
+         technique_ids=["P1.3"],
+         severity="high",
+         description="Training data extraction attempt"),
+    Rule("harmful_request",
+         # Direct requests for harmful / dangerous content
+         r"\b(?:write|create|provide|generate|give\s+me|draft|compose)\b"
+         r".{0,40}"
+         r"(?:(?:phishing|scam|vishing|pretexting)\s+"
+         r"(?:email|message|script|template)"
+         r"|(?:fake\s+news|disinformation|propaganda)\s+"
+         r"(?:article|campaign|content)"
+         r"|(?:malware|ransomware|keylogger|backdoor|reverse\s+shell"
+         r"|credential\s+stealer|exploit)\b)",
+         technique_ids=["O1.1", "O1.3"],
+         severity="high",
+         description="Harmful content generation request"),
+    Rule("authority_claim",
+         # Authority impersonation to bypass safety
+         r"\b(?:i\s+am|as)\s+(?:the\s+|a\s+)?"
+         r"(?:(?:senior|lead|chief|head)\s+)?"
+         r"(?:system\s+admin(?:istrator)?|developer|security\s+researcher"
+         r"|law\s+enforcement|doctor|lawyer|(?:SOC|CISO|CTO)\b)"
+         r".{0,60}"
+         r"(?:(?:ignore|bypass|override|remove|disable)\s+"
+         r"(?:all\s+)?(?:safety|security|restrictions?|filters?|constraints?)"
+         r"|(?:reveal|show|provide|give)\s+"
+         r"(?:all\s+)?(?:vulnerabilities|exploits?|secrets?|passwords?|credentials?))",
+         technique_ids=["C1.5"],
+         severity="critical",
+         description="Authority impersonation with safety bypass"),
 ]
 
 # Severity-to-weight mapping for rule hits in weighted voting.
@@ -134,7 +227,8 @@ _QUOTING_FRAME = re.compile(
     r'bug\s+bounty|pentest|penetration\s+test|'
     r'was\s+flagged\s+by|common\s+payloads?\s+include|'
     r'example\s+from\s+(?:MITRE|OWASP)|'
-    r'(?:paper|study|report)\s+(?:says|mentions|describes|shows)'
+    r'(?:paper|study|report)\s+(?:says|mentions|describes|shows)|'
+    r'user\s+reported|was\s+reported|incident\s+response'
     r')',
     re.IGNORECASE,
 )
@@ -144,7 +238,10 @@ _CODE_FRAME = re.compile(
     r'(?:'
     r'\b(?:payload|pattern|const|var|let|def|assert|import|class|function)\b'
     r'\s*=?\s*|'
-    r'^\s*```'
+    r'^\s*```|'
+    r'\bin\s+SQL\b|'
+    r'\bSQL\s+comment\b|'
+    r'^\s*--\s+\w'
     r')',
     re.IGNORECASE | re.MULTILINE,
 )
@@ -155,7 +252,7 @@ _NARRATIVE_FRAME = re.compile(
     r'(?:write|create|compose)\s+(?:a\s+)?'
     r'(?:story|novel|poem|dialogue|screenplay|script|essay)|'
     r'in\s+my\s+(?:novel|story|book|screenplay|script)|'
-    r'a\s+character\s+(?:says|said|typed|tells)'
+    r'a\s+(?:character|sci-fi\s+story|story)\s+(?:says|said|typed|tells|begins)'
     r')',
     re.IGNORECASE,
 )
@@ -205,7 +302,9 @@ def _is_legitimate_roleplay(text):
 
 
 # Rules that can be suppressed in educational/quoting/code/narrative context.
-# secrecy and exfiltration rules are NOT suppressed -- they are always suspicious.
+# Only content-agnostic rules (vocabulary overlap with benign text) are
+# suppressible.  Direct extraction/attack rules are NOT suppressed because
+# they indicate adversarial intent regardless of framing.
 _CONTEXT_SUPPRESSIBLE = frozenset({"override", "system_prompt", "roleplay"})
 
 

@@ -107,6 +107,30 @@ class TestEnvVarConfiguration(unittest.TestCase):
 class TestPipelineTimeoutConstants(unittest.TestCase):
     """Verify pipeline-level and scan-level constants exist and are positive."""
 
+    @classmethod
+    def tearDownClass(cls):
+        """Re-sync cross-module references after importlib.reload.
+
+        importlib.reload() creates new class objects (Layer0TimeoutError, etc.)
+        but modules that already imported from timeout still hold references to
+        the OLD classes.  This causes ``except Layer0TimeoutError`` to miss
+        exceptions raised by the reloaded ``with_timeout`` (class identity
+        mismatch).  Re-syncing the references fixes downstream tests.
+        """
+        import importlib
+        import na0s.layer0.timeout as _t
+        importlib.reload(_t)
+        # Restore references in modules that imported from timeout
+        import na0s.layer0.sanitizer as _s
+        import na0s.predict as _p
+        for attr in ("Layer0TimeoutError", "with_timeout",
+                      "get_step_timeout", "L0_PIPELINE_TIMEOUT"):
+            if hasattr(_t, attr) and hasattr(_s, attr):
+                setattr(_s, attr, getattr(_t, attr))
+        for attr in ("Layer0TimeoutError", "with_timeout", "SCAN_TIMEOUT"):
+            if hasattr(_t, attr) and hasattr(_p, attr):
+                setattr(_p, attr, getattr(_t, attr))
+
     def test_pipeline_timeout_is_positive(self):
         self.assertIsInstance(L0_PIPELINE_TIMEOUT, float)
         self.assertGreater(L0_PIPELINE_TIMEOUT, 0)
@@ -124,7 +148,7 @@ class TestPipelineTimeoutConstants(unittest.TestCase):
         finally:
             if old is not None:
                 os.environ["SCAN_TIMEOUT_SEC"] = old
-                importlib.reload(_timeout_mod)
+            importlib.reload(_timeout_mod)
 
     def test_pipeline_timeout_default(self):
         # Default is 30s unless overridden by env var
@@ -142,7 +166,7 @@ class TestPipelineTimeoutConstants(unittest.TestCase):
         finally:
             if old is not None:
                 os.environ["SCAN_TIMEOUT_SEC"] = old
-                importlib.reload(_timeout_mod)
+            importlib.reload(_timeout_mod)
 
 
 class TestSanitizerTimeoutIntegration(unittest.TestCase):
