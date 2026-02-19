@@ -28,6 +28,13 @@ try:
 except ImportError:
     _HAS_EMBEDDING = False
 
+# Layer 4+5 Ensemble — optional import
+try:
+    from .ensemble import ensemble_scan as _ensemble_scan
+    _HAS_ENSEMBLE = True
+except ImportError:
+    _HAS_ENSEMBLE = False
+
 # Layer 7: LLM checker — optional import
 try:
     from .llm_checker import LLMChecker, LLMCheckResult
@@ -331,7 +338,8 @@ class CascadeClassifier:
 
     def __init__(self, vectorizer=None, model=None, llm_judge=None,
                  enable_embedding=False, enable_positive_validation=True,
-                 enable_canary=False, enable_output_scanner=True):
+                 enable_canary=False, enable_output_scanner=True,
+                 enable_ensemble=False):
         self._vectorizer = vectorizer
         self._model = model
         self._whitelist = WhitelistFilter()
@@ -342,6 +350,10 @@ class CascadeClassifier:
         self._embedding_model = None
         self._embedding_classifier = None
         self._enable_embedding = enable_embedding and _HAS_EMBEDDING
+
+        # Layer 4+5 Ensemble — optional
+        self._enable_ensemble = enable_ensemble and _HAS_ENSEMBLE
+        self._ensemble_used = 0
 
         # Layer 7: LLM checker — lazy-initialised on first use if no
         # llm_judge was explicitly passed and the module is available.
@@ -457,10 +469,29 @@ class CascadeClassifier:
         )
         self._classified += 1
 
-        # Layer 5: Embedding classifier — second ML opinion
-        # When the weighted classifier produces an ambiguous result,
-        # consult the embedding model for a semantic second opinion.
-        if self._enable_embedding:
+        # Layer 4+5: Ensemble (TF-IDF + Embedding weighted average)
+        # When ensemble is enabled, it replaces the ad-hoc embedding blending
+        # with a principled weighted average of calibrated probabilities.
+        if self._enable_ensemble and _HAS_ENSEMBLE:
+            try:
+                ensemble_result = _ensemble_scan(
+                    clean,
+                    vectorizer=self._vectorizer,
+                    model=self._model,
+                )
+                if not ensemble_result.rejected:
+                    self._ensemble_used += 1
+                    label = "MALICIOUS" if ensemble_result.is_malicious else "SAFE"
+                    confidence = ensemble_result.risk_score
+                    for h in ensemble_result.rule_hits:
+                        if h not in hits:
+                            hits.append(h)
+            except Exception:
+                pass  # Ensemble failure is non-fatal
+
+        # Layer 5: Embedding classifier (legacy ad-hoc blending)
+        # Only used when ensemble is NOT enabled but embedding IS enabled.
+        elif self._enable_embedding:
             try:
                 if self._ensure_embedding_model():
                     emb_label, emb_conf, emb_hits, _ = classify_prompt_embedding(
@@ -707,6 +738,7 @@ class CascadeClassifier:
             "judge_overrides": self._judge_overrides,
             "blocked": self._blocked,
             "embedding_used": self._embedding_used,
+            "ensemble_used": self._ensemble_used,
             "positive_validated": self._positive_validated,
             "positive_validation_overrides": self._positive_validation_overrides,
             "canary_checks": self._canary_checks,
@@ -721,6 +753,7 @@ class CascadeClassifier:
         self._judge_overrides = 0
         self._blocked = 0
         self._embedding_used = 0
+        self._ensemble_used = 0
         self._positive_validated = 0
         self._positive_validation_overrides = 0
         self._canary_checks = 0
