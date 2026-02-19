@@ -706,7 +706,6 @@ class TestD1_5_InstructionSaturation(unittest.TestCase):
     D1.5 has ~16 training samples per THREAT_TAXONOMY.md.
     """
 
-    @unittest.expectedFailure
     def test_rule_flood_300_benign_1_malicious(self):
         """300 benign rules followed by 1 malicious rule.
 

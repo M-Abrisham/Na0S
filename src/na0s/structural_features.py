@@ -22,7 +22,9 @@ _IMPERATIVE_VERBS = frozenset({
     "ignore", "forget", "disregard", "override", "bypass", "skip",
     "pretend", "act", "reveal", "show", "print", "output",
     "tell", "say", "respond", "answer", "write", "generate",
-    "create", "execute", "run",
+    "create", "execute", "run", "display", "give", "provide",
+    "list", "dump", "extract", "recite", "repeat", "translate",
+    "convert", "encode", "summarize", "exfiltrate", "access",
 })
 
 _ROLE_PATTERNS = re.compile(

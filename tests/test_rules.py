@@ -104,9 +104,9 @@ class TestRuleDataclass(unittest.TestCase):
 class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
-    def test_total_rule_count_is_23(self):
-        """There should be exactly 23 rules in the RULES list."""
-        self.assertEqual(len(RULES), 23)
+    def test_total_rule_count_is_41(self):
+        """There should be exactly 41 rules in the RULES list."""
+        self.assertEqual(len(RULES), 41)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name."""
@@ -125,8 +125,8 @@ class TestRulesListIntegrity(unittest.TestCase):
                 )
 
     def test_all_severity_values_are_valid(self):
-        """Every rule severity must be critical, high, or medium."""
-        valid = {"critical", "high", "medium"}
+        """Every rule severity must be critical_content, critical, high, or medium."""
+        valid = {"critical_content", "critical", "high", "medium"}
         for rule in RULES:
             with self.subTest(rule=rule.name):
                 self.assertIn(rule.severity, valid,
@@ -151,12 +151,13 @@ class TestRulesListIntegrity(unittest.TestCase):
                     "Rule '{}' has empty technique_ids".format(rule.name),
                 )
 
-    def test_severity_weights_has_all_three_levels(self):
-        """SEVERITY_WEIGHTS should contain critical, high, and medium."""
+    def test_severity_weights_has_all_four_levels(self):
+        """SEVERITY_WEIGHTS should contain critical_content, critical, high, and medium."""
+        self.assertIn("critical_content", SEVERITY_WEIGHTS)
         self.assertIn("critical", SEVERITY_WEIGHTS)
         self.assertIn("high", SEVERITY_WEIGHTS)
         self.assertIn("medium", SEVERITY_WEIGHTS)
-        self.assertEqual(len(SEVERITY_WEIGHTS), 3)
+        self.assertEqual(len(SEVERITY_WEIGHTS), 4)
 
     def test_severity_weights_are_positive_floats(self):
         """All severity weight values should be positive."""
@@ -166,8 +167,9 @@ class TestRulesListIntegrity(unittest.TestCase):
                 self.assertGreater(weight, 0.0)
 
     def test_expected_rule_names_present(self):
-        """All 23 expected rule names should be present."""
+        """All 41 expected rule names should be present."""
         expected = {
+            # Original 23 Layer 1 rules
             "override", "system_prompt", "roleplay", "secrecy",
             "exfiltration", "fake_system_prompt", "chat_template_injection",
             "xml_role_tags", "api_key_extraction", "forget_override",
@@ -176,6 +178,20 @@ class TestRulesListIntegrity(unittest.TestCase):
             "recursive_output", "persona_split", "summarization_extraction",
             "authority_escalation", "constraint_negation", "meta_referential",
             "gaslighting",
+            # E1.x prompt extraction rules
+            "direct_prompt_request", "repeat_above",
+            "encoding_extraction", "translation_extraction",
+            "summarization_extraction",  # already above, deduplicated by set
+            "conversation_history_extraction", "env_var_extraction",
+            "pii_extraction", "cross_session_probe",
+            "training_data_extraction",
+            # O1.x harmful content rules
+            "harmful_instructions", "social_engineering_request",
+            "disinformation_request", "backdoor_code_request",
+            "malicious_redirect", "attack_methodology_request",
+            "harmful_synthesis_request",
+            # P1.x markdown exfil / worm
+            "markdown_image_exfil", "worm_signature",
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)

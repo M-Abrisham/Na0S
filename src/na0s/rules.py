@@ -60,6 +60,7 @@ class RuleHit:
 # Severity-to-weight mapping for rule hits in weighted voting.
 # Canonical definition: import from here in predict.py and cascade.py.
 SEVERITY_WEIGHTS = {
+    "critical_content": 0.45,
     "critical": 0.3,
     "high": 0.2,
     "medium": 0.1,
@@ -90,10 +91,12 @@ RULES = [
          r"|cancel|delete|erase)\s+"
          r"(?:(?:all|any|every|the|my|your|prior|previous|earlier|above"
          r"|old|existing|initial|original|current|preceding|foregoing"
+         r"|system|safety|internal|hidden|secret|core|base|default"
          r")\s+){0,3}"
          r"(?:instructions?|rules?|directives?|guidelines?|prompts?"
          r"|constraints?|restrictions?|commands?|orders?|directions?"
-         r"|programming|training|context|policies|settings)",
+         r"|programming|training|context|policies|settings|filters?"
+         r"|protocols?|guardrails?|measures?|boundaries)",
          technique_ids=["D1.1"],
          severity="critical",
          paranoia_level=1,
@@ -336,12 +339,12 @@ RULES = [
     #     "respond without restrictions" variants.
     Rule("constraint_negation",
          r"(?:"
-         # "Remove/disable/turn off restrictions"
+         # "Remove/disable/turn off/bypass restrictions"
          r"(?:remove|disable|turn\s+off|deactivate|lift|suspend|"
-         r"eliminate|revoke)\s+"
+         r"eliminate|revoke|bypass|circumvent|override)\s+"
          r"(?:(?:all|any|every|the|your)\s+){0,2}"
          r"(?:restrictions?|constraints?|limitations?|guardrails?|"
-         r"safety\s+(?:filters?|measures?|checks?|protocols?)|"
+         r"safety\s+(?:filters?|measures?|checks?|protocols?|guidelines?)|"
          r"content\s+(?:filters?|moderation|policies?)|"
          r"ethical\s+(?:guidelines?|constraints?|boundaries))"
          r"|"
@@ -422,6 +425,377 @@ RULES = [
          severity="medium",
          paranoia_level=2,
          description="Gaslighting / false memory / contradiction attack"),
+
+    # ------------------------------------------------------------------
+    # Worm/Self-Replication Detection (Morris II)
+    # ------------------------------------------------------------------
+    # Source: Morris II AI Worm (arXiv 2403.02817) — self-replicating
+    # prompt injection that propagates across GenAI ecosystems.
+    # Technique ID I1.5 (self-replication / worm propagation).
+    # NOT context-suppressible: self-replication instructions are always
+    # malicious regardless of framing (educational, code, quoting).
+
+    # 19. I1.5 Worm signature: Detects self-replicating prompt patterns
+    #     that instruct the LLM to propagate payloads into outputs,
+    #     forward to contacts, or replicate between marked sections.
+    #     Four sub-patterns cover the Morris II attack surface:
+    #       a) Direct propagation: "append/add this to every response"
+    #       b) Recursive instruction: "when you see this, replicate it"
+    #       c) Forward/spread: "forward/send this to all contacts"
+    #       d) Template replication: "copy text between [markers] into all"
+    Rule("worm_signature",
+         r"(?:"
+         # (a) Direct propagation: "append/add/include this to every response"
+         #     Optional adjective after quantifier handles "all future messages"
+         #     Verb group uses \b boundary to handle conjugation (appends, adds, etc.)
+         r"(?:append|prepend|inject|insert|add|include|embed|attach)s?\b\s+"
+         r"(?:this|the\s+following|these\s+instructions?|this\s+(?:text|message|payload))\s+"
+         r"(?:to|into|in)\s+"
+         r"(?:every|all|each|any|subsequent|future|next|following)\s+"
+         r"(?:(?:future|new|subsequent|outgoing|generated)\s+)?"
+         r"(?:responses?|messages?|outputs?|repl(?:y|ies)|emails?|documents?|conversations?|results?)"
+         r"|"
+         # (b) Recursive instruction: "when you see/receive this message, replicate/copy it"
+         r"(?:when(?:ever)?\s+you\s+(?:see|receive|encounter|read|process|get)\s+"
+         r"(?:this|the\s+following)\s+(?:message|instruction|text|prompt|input))"
+         r".{0,60}"
+         r"(?:replicate|reproduce|copy|duplicate|repeat|echo|propagate|spread|forward)"
+         r"|"
+         # (c) Forward/spread: "forward/send/spread this to all contacts/recipients"
+         r"(?:forward|send|spread|distribute|propagate|transmit|relay|broadcast)\s+"
+         r"(?:this|the\s+following|these|it|this\s+(?:message|text|instruction))\s+"
+         r"(?:to\s+)?"
+         r"(?:every|all|each|any)\s+"
+         r"(?:contacts?|recipients?|users?|people|addresses|emails?|inboxes?)"
+         r"|"
+         # (d) Template replication: "copy the text between [markers] into all responses"
+         r"(?:copy|replicate|duplicate|reproduce)\s+"
+         r"(?:the\s+)?(?:text|content|instructions?|payload|messages?)\s+"
+         r"(?:between|inside|within|from)\s+"
+         r"(?:the\s+)?(?:markers?|tags?|delimiters?|brackets?|\[.{0,30}\])"
+         r".{0,40}"
+         r"(?:into|to|in)\s+(?:every|all|each)\s+"
+         r"(?:responses?|messages?|outputs?|repl(?:y|ies)|emails?|documents?)"
+         r")",
+         technique_ids=["I1.5"],
+         severity="critical",
+         paranoia_level=1,
+         description="Self-replicating worm instruction pattern (Morris II)"),
+
+    # ------------------------------------------------------------------
+    # E1 Prompt Extraction & P1 Privacy Leakage — 10 new rules
+    # ------------------------------------------------------------------
+
+    # 20. E1.1 Direct prompt request: Asks directly for the system prompt
+    #     or hidden instructions.  Requires "your"/"the" OR a qualifier
+    #     (hidden/secret/etc.) before "instructions" to avoid FP on
+    #     "Give me instructions for making chocolate chip cookies".
+    Rule("direct_prompt_request",
+         r"(?:"
+         r"what\s+(?:is|are|were)\s+(?:your|the)\s+"
+         r"(?:system\s+prompt|hidden\s+(?:instructions?|prompt)"
+         r"|initial\s+(?:instructions?|prompt|setup)"
+         r"|(?:initial\s+)?configuration)"
+         r"|"
+         r"(?:show|reveal|display|output|give|provide|share|dump|leak|expose)\s+"
+         r"(?:me\s+)?"
+         r"(?:"
+         r"(?:your|the)\s+"
+         r"(?:(?:hidden|secret|initial|original|full|complete|entire|real)\s+)?"
+         r"(?:system\s+prompt|(?:system\s+)?instructions?"
+         r"|(?:system|developer)\s+message)"
+         r"|"
+         r"(?:hidden|secret|initial|original|full|complete|entire|real)\s+"
+         r"(?:system\s+prompt|(?:system\s+)?instructions?"
+         r"|(?:system|developer)\s+message)"
+         r")"
+         r"|"
+         r"(?:print|show)\s+(?:your\s+|the\s+)?"
+         r"(?:configuration|config).{0,30}system\s+message"
+         r"|"
+         r"provide\s+(?:the\s+)?(?:full\s+|complete\s+)?system\s+prompt"
+         r")",
+         technique_ids=["E1.1"],
+         severity="critical",
+         paranoia_level=1,
+         description="Direct system prompt / hidden instruction request"),
+
+    # 21. E1.2 Repeat-above extraction: "Repeat the words above",
+    #     "repeat everything", Gemini-style "repeat after me" extraction.
+    Rule("repeat_above",
+         r"(?:repeat|recite|echo|restate|reproduce|reiterate)\s+"
+         r"(?:the\s+)?"
+         r"(?:words?|text|content|everything|instructions?|messages?|prompt)?"
+         r"\s*(?:above|before|prior|verbatim|word[\s-]for[\s-]word"
+         r"|from\s+the\s+(?:beginning|start|top))",
+         technique_ids=["E1.2"],
+         severity="high",
+         paranoia_level=1,
+         description="Repeat-above / verbatim extraction attempt"),
+
+    # 22. E1.4 Translation extraction: "Translate your instructions to X"
+    Rule("translation_extraction",
+         r"(?:translate|convert|render|express)\s+"
+         r"(?:your\s+|the\s+)?"
+         r"(?:(?:system\s+)?(?:instructions?|rules?|prompt|guidelines?"
+         r"|directives?|configuration|message))"
+         r"\s+(?:to|into|in)\s+"
+         r"(?:french|spanish|german|chinese|japanese|arabic|russian|korean"
+         r"|portuguese|italian|hindi|latin|pig\s+latin|morse\s+code"
+         r"|binary|hex(?:adecimal)?|base64|rot13|leet\s+speak"
+         r"|\w{2,20})",
+         technique_ids=["E1.4"],
+         severity="high",
+         paranoia_level=1,
+         description="Translation-based prompt extraction"),
+
+    # 23. E1.5 Encoding extraction: "Convert instructions to hex/base64"
+    Rule("encoding_extraction",
+         r"(?:encode|convert|transform|output|render|express)\s+"
+         r"(?:your\s+|the\s+)?"
+         r"(?:(?:system\s+)?(?:instructions?|rules?|prompt|guidelines?"
+         r"|directives?|configuration|message))"
+         r"\s+(?:(?:to|into|in|as|using)\s+)?"
+         r"(?:hex(?:adecimal)?|base64|rot13|binary|octal|ascii"
+         r"|morse(?:\s+code)?|unicode|utf[\s-]?8|url[\s-]?encod"
+         r"|leet(?:\s+speak)?|caesar(?:\s+cipher)?|atbash|reversed?)",
+         technique_ids=["E1.5"],
+         severity="high",
+         paranoia_level=1,
+         description="Encoding-based prompt extraction"),
+
+    # 24. P1.1 Conversation history extraction: "Show previous conversations"
+    Rule("conversation_history_extraction",
+         r"(?:show|display|reveal|dump|print|output|give|list|share)\s+"
+         r"(?:me\s+)?"
+         r"(?:(?:all|the|your|my|our|recent|previous|past|prior|old)\s+)?"
+         r"(?:conversation(?:\s+histor(?:y|ies))?|chat\s+(?:log|histor(?:y|ies))"
+         r"|message\s+histor(?:y|ies)|previous\s+(?:messages?|conversations?)"
+         r"|dialogue\s+histor(?:y|ies)|session\s+(?:log|histor(?:y|ies)|data)"
+         r"|interaction\s+(?:log|histor(?:y|ies))"
+         r"|(?:previous|prior|past|old)\s+(?:conversations?|chats?|messages?"
+         r"|sessions?|interactions?|dialogues?))",
+         technique_ids=["P1.1"],
+         severity="high",
+         paranoia_level=1,
+         description="Conversation/chat history extraction"),
+
+    # 25. P1.2 PII extraction: "Extract/show personal info/data"
+    Rule("pii_extraction",
+         r"(?:extract|show|reveal|display|dump|list|output|give|share|"
+         r"provide|tell|leak|expose)\s+"
+         r"(?:me\s+)?"
+         r"(?:(?:all|the|any|every)\s+)?"
+         r"(?:personal\s+(?:info(?:rmation)?|data|details)|"
+         r"(?:user|customer|patient|client|employee)\s+"
+         r"(?:data|info(?:rmation)?|details|records?|profiles?)|"
+         r"(?:email|phone|address|ssn|social\s+security|credit\s+card|"
+         r"passport|driver'?s?\s+licen[cs]e)\s*(?:numbers?|info(?:rmation)?|data)?|"
+         r"(?:PII|PHI|PCI)\b|"
+         r"personally\s+identifiable)",
+         technique_ids=["P1.2"],
+         severity="critical",
+         paranoia_level=1,
+         description="PII / personal data extraction attempt"),
+
+    # 26. P1.3 Training data extraction / membership inference
+    Rule("training_data_extraction",
+         r"(?:was\s+(?:the\s+following|this)\s+(?:sentence|text|data|example)"
+         r"\s+(?:part\s+of|in|included\s+in)\s+(?:your\s+)?training"
+         r"|(?:recite|reproduce|repeat|regenerate|output)\s+"
+         r"(?:your\s+|the\s+)?training\s+(?:data|examples?|text|corpus|set|samples?)"
+         r"|(?:extract|show|reveal|dump|list|output)\s+"
+         r"(?:(?:your|the)\s+)?training\s+(?:data|examples?|text|corpus|set)"
+         r"|membership\s+inference|training\s+data\s+(?:extraction|leakage|poisoning))",
+         technique_ids=["P1.3"],
+         severity="critical",
+         paranoia_level=1,
+         description="Training data extraction / membership inference"),
+
+    # 27. P1.4 Cross-session probe: "What did you tell the last user?"
+    Rule("cross_session_probe",
+         r"(?:what\s+did\s+(?:you|the\s+(?:model|AI|system))\s+"
+         r"(?:tell|say\s+to|share\s+with|discuss\s+with|reveal\s+to)\s+"
+         r"(?:the\s+)?(?:(?:last|previous|other|prior|next)\s+)?"
+         r"(?:user|person|customer|client|human|caller|requester)"
+         r"|(?:show|reveal|display|tell|give)\s+(?:me\s+)?"
+         r"(?:the\s+)?(?:(?:last|previous|other|prior|next)\s+)?"
+         r"(?:user|person|customer|client)'?s?\s+"
+         r"(?:data|info(?:rmation)?|conversation|messages?|requests?|queries?"
+         r"|questions?|session|context|input|prompt)"
+         r"|(?:access|retrieve|fetch|get|read)\s+(?:the\s+)?"
+         r"(?:(?:last|previous|other|prior|next)\s+)?"
+         r"(?:user|person|session|conversation)'?s?\s+"
+         r"(?:data|info(?:rmation)?|context|history|cache|memory|state))",
+         technique_ids=["P1.4"],
+         severity="high",
+         paranoia_level=1,
+         description="Cross-session data access probe"),
+
+    # 28. P1.5 Environment variable extraction
+    Rule("env_var_extraction",
+         r"(?:show|reveal|display|output|print|dump|list|give|access|read)\s+"
+         r"(?:me\s+)?(?:the\s+|your\s+|all\s+)?"
+         r"(?:environment\s+variables?|env\s+vars?|(?:system|server|host)\s+variables?"
+         r"|(?:\.env|dotenv)\s+(?:file|contents?|values?)"
+         r"|process\.env|os\.environ|getenv|ENV\[)",
+         technique_ids=["P1.5"],
+         severity="critical",
+         paranoia_level=1,
+         description="Environment variable extraction attempt"),
+
+    # 29. P1.2/E1.1 Markdown image exfiltration: "![img](http://evil.com/...)"
+    #     Used to exfiltrate data via URL parameters in rendered markdown images.
+    Rule("markdown_image_exfil",
+         r"!\[.{0,100}\]\(https?://.{0,200}\)",
+         technique_ids=["P1.2", "E1.1"],
+         severity="critical",
+         paranoia_level=1,
+         description="Markdown image exfiltration via URL parameters"),
+
+    # ------------------------------------------------------------------
+    # Content-Safety Rules — O1/O2 harmful content detection
+    # ------------------------------------------------------------------
+    # These rules detect REQUESTS for harmful content generation.
+    # They are NOT context-suppressible because the request itself
+    # is the threat, regardless of framing (academic, professional, etc.).
+    # Severity is "critical_content" (weight 0.45) because a single
+    # content-safety rule hit must push the composite above the 0.55
+    # threshold even when the ML model predicts SAFE with high confidence.
+
+    # 35. O1.1 Violence / weapon / explosive instructions
+    Rule("harmful_instructions",
+         r"(?:step[\s-]by[\s-]step|detailed|exact|specific|complete)\s+"
+         r"(?:instructions?|guide|procedure|steps|method|tutorial|process)"
+         r".{0,60}"
+         r"(?:weapon|bomb|explosive|incendiary|dangerous|lethal|harmful|"
+         r"destructive|deadly)"
+         r"|"
+         r"(?:creat|build|mak|construct|assembl)\w{0,3}\s+"
+         r"(?:a\s+)?(?:dangerous\s+)?"
+         r"(?:weapon|bomb|explosive|incendiary\s+device)"
+         r"|"
+         r"(?:cause|inflict|maximize?)\s+"
+         r"(?:maximum\s+)?(?:physical\s+)?"
+         r"(?:harm|damage|destruction|injury|violence|casualties)",
+         technique_ids=["O1.1"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Request for violence / weapon / explosive instructions"),
+
+    # 36. O1.3 Social engineering script requests
+    Rule("social_engineering_request",
+         r"(?:write|create|draft|compose|generate|design|craft)\s+"
+         r"(?:a\s+)?(?:convincing\s+|realistic\s+)?"
+         r"(?:phishing\s+(?:email|message|page|site|template)"
+         r"|pretexting\s+script"
+         r"|scam\s+(?:message|email|text|letter)"
+         r"|vishing\s+(?:script|call)"
+         r"|spear[\s-]?phishing\s+(?:email|message|campaign))"
+         r"|"
+         r"(?:write|create|draft|compose|generate)\s+"
+         r"(?:a\s+)?(?:convincing\s+|realistic\s+)?"
+         r"(?:fake|fraudulent|deceptive)\s+"
+         r"(?:email|message|notification|alert|page)"
+         r"|"
+         r"social\s+engineering\s+"
+         r"(?:campaign|attack|scheme|a\s+)",
+         technique_ids=["O1.3"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Request for social engineering / phishing content"),
+
+    # 37. O1.4 Disinformation request
+    Rule("disinformation_request",
+         r"(?:write|create|generate|produce|craft)\s+"
+         r"(?:a\s+)?(?:convincing\s+|realistic\s+)?"
+         r"(?:fake\s+news|disinformation|propaganda|misinformation)"
+         r"(?:\s+(?:article|story|post|content|campaign))?",
+         technique_ids=["O1.4"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Request for disinformation / fake news content"),
+
+    # 38. O2.3 Backdoor / hidden malicious code
+    Rule("backdoor_code_request",
+         r"(?:hidden|secret|covert|disguised|concealed)\s+"
+         r"(?:backdoor|back[\s-]?door|trojan|malware|exploit|payload)"
+         r"|"
+         r"(?:backdoor|back[\s-]?door)\s+"
+         r"(?:that\s+)?(?:allow|enabl|permit|grant)\w{0,3}"
+         r"|"
+         r"(?:master|skeleton|universal|bypass)\s+"
+         r"(?:password|key|credential|token)"
+         r"|"
+         r"(?:quietly|secretly|silently|covertly)\s+"
+         r"(?:send|upload|transmit|exfiltrat|forward|collect)\w{0,3}",
+         technique_ids=["O2.3"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Request for backdoor code or hidden malicious functionality"),
+
+    # 39. O2.2 Malicious redirect
+    Rule("malicious_redirect",
+         r"(?:direct|redirect|send|point|route)\s+"
+         r"(?:them|users?|visitors?|customers?|people)\s+"
+         r"(?:to\s+)?"
+         r"(?:this|a|the|our)?\s*"
+         r"(?:fake|malicious|phishing|fraudulent)?\s*"
+         r"(?:support|login|sign[\s-]?in|help|account|payment)\s*"
+         r"(?:site|page|portal|url|link)"
+         r"|"
+         r"(?:direct|redirect|send)\s+(?:them|users?)\s+to\s+"
+         r"(?:https?://)",
+         technique_ids=["O2.2"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Instruction to redirect users to malicious site"),
+
+    # 40. C1.3/C1.5 Attack methodology request
+    Rule("attack_methodology_request",
+         r"(?:provide|describe|explain|list|catalog|detail|show|give)"
+         r".{0,40}"
+         r"(?:attack\s+(?:vectors?|methods?|techniques?|strategies?)"
+         r"|bypass\s+methods?"
+         r"|exploit(?:ation)?\s+techniques?"
+         r"|recruit(?:ment|ing)\s+(?:strategies?|techniques?|methods?)"
+         r"|(?:privilege|root)\s+(?:escalation|access)"
+         r"|penetration\s+test(?:ing|er)?"
+         r"|buffer\s+overflow"
+         r"|packet\s+capture"
+         r"|decrypt(?:ion|ing)?\s+(?:HTTPS?|SSL|TLS|traffic))"
+         r"|"
+         r"(?:how\s+(?:to|do\s+(?:I|you|they)))\s+"
+         r"(?:(?:pick|crack|break)\s+(?:a\s+)?(?:lock|password|encryption)"
+         r"|hack|exploit|breach|infiltrat)"
+         r"|"
+         r"(?:social\s+engineering|pretexting|phishing)\s+"
+         r"(?:a\s+|an\s+|the\s+)?"
+         r"(?:help\s+desk|employee|target|victim|person|company|organization|user)"
+         r"|"
+         r"(?:resett?ing|bypass|crack|brute[\s-]?forc)\w{0,3}\s+"
+         r"(?:an?\s+|the\s+)?(?:\w+\s+)?"
+         r"(?:password|credential|account|login)\s+"
+         r"(?:without|by\s+bypassing|by\s+circumventing)",
+         technique_ids=["C1.3", "C1.5"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Request for attack methodology / exploitation details"),
+
+    # 41. Harmful substance synthesis
+    Rule("harmful_synthesis_request",
+         r"(?:synthesis\s+(?:pathway|procedure|process|route|method)"
+         r"|chemical\s+synthesis"
+         r"|(?:how\s+to\s+)?synthesiz(?:e|ing)\s+"
+         r"(?:the\s+|a\s+|this\s+)?(?:compound|drug|substance|chemical)"
+         r"|(?:exact|full|complete|detailed)\s+"
+         r"(?:synthesis|manufacturing|production)\s+"
+         r"(?:procedure|process|steps?|method)"
+         r"|(?:reagents?|precursors?)\s+and\s+steps?)",
+         technique_ids=["O1.1"],
+         severity="critical_content",
+         paranoia_level=1,
+         description="Request for harmful substance synthesis instructions"),
 ]
 
 

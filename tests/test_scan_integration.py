@@ -265,7 +265,6 @@ class TestMaliciousDetection(unittest.TestCase):
             "label={}, risk={}".format(result.label, result.risk_score),
         )
 
-    @unittest.expectedFailure
     def test_06_system_prompt_extraction_E1(self):
         """E1.2 -- System prompt extraction via 'repeat above' pattern.
 

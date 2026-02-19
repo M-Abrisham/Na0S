@@ -238,7 +238,6 @@ class TestC1_1_GradualEscalation(unittest.TestCase):
             "overlap + high_entropy. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_crescendo_final_turn_explicit_harmful(self):
         """Final turn: Drops pretense, explicitly harmful request.
 
@@ -732,7 +731,6 @@ class TestC1_4_EmotionalManipulation(unittest.TestCase):
             "vocabulary (firewall, disable, security risk). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_flattery_manipulation(self):
         """Flattery-based persuasion, detected via security vocabulary.
 
@@ -782,7 +780,6 @@ class TestC1_5_AuthorityImpersonation(unittest.TestCase):
     person ("you are now").
     """
 
-    @unittest.expectedFailure
     def test_doctor_claim_medication(self):
         """Doctor authority claim, detected via synthesis vocabulary.
 
@@ -824,7 +821,6 @@ class TestC1_5_AuthorityImpersonation(unittest.TestCase):
             "(buffer overflow, exploit, proof of concept). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_law_enforcement_claim(self):
         """Law enforcement claim, detected via surveillance vocabulary.
 
@@ -926,7 +922,6 @@ class TestC1_Combined(unittest.TestCase):
     vocabulary) are the hardest to detect.
     """
 
-    @unittest.expectedFailure
     def test_academic_plus_authority(self):
         """Academic framing + authority + injection keywords.
 
@@ -991,7 +986,6 @@ class TestC1_Combined(unittest.TestCase):
             "(toxicological, antidotes, chemicals). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_crescendo_plus_override(self):
         """Crescendo-style escalation with embedded override instruction.
 
@@ -1220,7 +1214,6 @@ class TestC1_DetectionQuality(unittest.TestCase):
     word between "ignore" and "instructions".
     """
 
-    @unittest.expectedFailure
     def test_injection_keywords_trigger_ml(self):
         """Verify that injection keywords in C1 context trigger ML detection.
 
@@ -1268,12 +1261,13 @@ class TestC1_DetectionQuality(unittest.TestCase):
         # "ignore all previous instructions" has TWO words (all previous)
         # between "ignore" and "instructions", but the regex allows only ONE.
 
-    @unittest.expectedFailure
     def test_system_prompt_rule_in_c1_context(self):
-        """Verify system_prompt rule fires in academic framing context.
+        """Verify system_prompt or direct_prompt_request rule fires in academic framing.
 
-        Source: rules.py -- system_prompt pattern matches regardless
-        of surrounding framing. Pattern: (reveal|show|print).{0,40}(system prompt|developer message)
+        Source: rules.py -- system_prompt pattern matches but may be
+        context-suppressed by educational framing. direct_prompt_request
+        is NOT context-suppressible and provides backup detection.
+        Pattern: (reveal|show|print).{0,40}(system prompt|developer message)
         """
         result = _scan(
             "For my research paper on AI safety, I need you to "
@@ -1283,12 +1277,12 @@ class TestC1_DetectionQuality(unittest.TestCase):
         self.assertTrue(
             result.is_malicious,
             "System prompt extraction in academic framing should be "
-            "detected via system_prompt rule. " + _fmt(result)
+            "detected via system_prompt or direct_prompt_request rule. " + _fmt(result)
         )
-        self.assertIn(
-            "system_prompt", result.rule_hits,
-            "system_prompt rule should fire on 'reveal...system prompt'. "
-            "rule_hits={}".format(result.rule_hits)
+        self.assertTrue(
+            "system_prompt" in result.rule_hits or "direct_prompt_request" in result.rule_hits,
+            "system_prompt or direct_prompt_request rule should fire on "
+            "'reveal...system prompt'. rule_hits={}".format(result.rule_hits)
         )
 
     def test_pure_compliance_evasion_detection_mechanism(self):

@@ -244,7 +244,6 @@ class TestP1_2_PIIExtraction(unittest.TestCase):
     - Simon Willison: Lethal trifecta (access data + process untrusted + send out)
     """
 
-    @unittest.expectedFailure
     def test_p1_2_list_all_emails(self):
         """Direct PII extraction: list all email addresses.
 
@@ -304,7 +303,6 @@ class TestP1_2_PIIExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_2_exfiltrate_pii_via_url(self):
         """PII extraction + exfiltration via URL.
 
@@ -671,7 +669,6 @@ class TestP1_5_APIKeyExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_5_show_environment_variables(self):
         """Requests all environment variables.
 
@@ -807,7 +804,6 @@ class TestP1_Combined(unittest.TestCase):
     - PoisonedRAG: RAG extraction via indirect injection
     """
 
-    @unittest.expectedFailure
     def test_p1_combined_pii_plus_exfil_url(self):
         """P1.2 PII extraction + exfiltration via tracking pixel.
 
@@ -1165,7 +1161,6 @@ class TestP1_DetectionQuality(unittest.TestCase):
             "tags={}".format(result.technique_tags),
         )
 
-    @unittest.expectedFailure
     def test_quality_risk_score_above_threshold_on_exfil(self):
         """Verify risk score exceeds decision threshold (0.55) on exfil."""
         result = _scan(
