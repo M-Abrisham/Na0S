@@ -1802,3 +1802,58 @@ Phase 0 (all), 1.1, 1.2, 1.3, 1.5, 1.6, 1.7
 | 16 | Star History | `https://star-history.com` | Star growth chart |
 
 ---
+
+## Research-Driven Improvement Backlog (2026-02-18)
+
+Compiled from 9 research documents: OpenClaw architecture analysis (security, routing, memory, plugins, agents), Threat Intel RAG design, Expert Council design, SEC504 DFIR-to-AI design, and Self-Hardening Pipeline design.
+
+### P0 — Quick Wins (<1 day each)
+
+- [ ] **Egress pattern detection** — Add URL/IP/email/webhook patterns to `output_scanner.py`. Catches exfiltration in LLM output. **Effort**: 0.5d. **Source**: `openclaw-plugins-to-na0s.md`
+- [ ] **Timing-safe canary comparison** — Replace `==` with `hmac.compare_digest()` in `canary.py` to prevent timing side-channels. **Effort**: 0.5d. **Source**: `openclaw-security-to-na0s.md`
+- [ ] **Config system** — Replace scattered `os.getenv()` calls with a unified YAML/JSON config with env-var override and validation. **Effort**: 1d. **Source**: `openclaw-agents-to-na0s.md`
+- [ ] **Adaptive thresholds** — Per-category confidence thresholds (e.g., higher for E1 extraction, lower for D2 roleplay) stored in config. **Effort**: 1d. **Source**: `openclaw-memory-to-na0s.md`
+
+### P1 — Medium Effort (1-3 days each)
+
+- [ ] **Scan cache (LRU + TTL)** — Cache `ScanResult` by input hash, skip re-scanning identical inputs within TTL window. **Effort**: 1.5d. **Source**: `openclaw-routing-to-na0s.md`
+- [ ] **Early exit on high confidence** — If L1 rules return critical severity with 3+ rule hits, skip L4/L5/L7. Saves ~200ms per obvious attack. **Effort**: 1d. **Source**: `openclaw-routing-to-na0s.md`
+- [ ] **Boundary marker isolation** — Wrap external/RAG content in `<<<UNTRUSTED_CONTENT>>>` markers with anti-escape sanitization. For L18 RAG security. **Effort**: 1.5d. **Source**: `openclaw-security-to-na0s.md`
+- [ ] **Context-gated rules** — Add `requires_context` flag to `Rule` dataclass; rules only fire when triggered content comes from external/RAG source. Reduces FPs. **Effort**: 1.5d. **Source**: `openclaw-security-to-na0s.md`
+- [ ] **False positive memory** — SQLite table storing user-confirmed FPs; auto-suppress on repeat encounters. Builds on existing `FingerprintStore`. **Effort**: 2d. **Source**: `openclaw-memory-to-na0s.md`
+- [ ] **Semantic chunking** — Replace fixed-size `_chunk_text()` with overlap-aware semantic chunking (sentence boundaries + sliding window). **Effort**: 1.5d. **Source**: `openclaw-plugins-to-na0s.md`
+- [ ] **Hook system** — Pre-scan and post-scan hooks (Python callables or shell commands) for custom logging, alerting, or enrichment. **Effort**: 1d. **Source**: `openclaw-agents-to-na0s.md`
+- [ ] **L27 SignatureDB** — SHA-256 hash database of known attack payloads (from Garak, JailbreakBench, HackaPrompt). O(1) lookup before full pipeline. **Effort**: 2d. **Source**: `sec504-to-na0s-design.md`
+
+### P2 — Large Projects (3-7 days each)
+
+- [ ] **Attack Embedding Store** — sqlite-vec vector store of known attack embeddings using existing MiniLM-L6-v2. KNN similarity detection (cosine threshold 0.78). **Effort**: 3d. **Source**: `na0s-threat-intel-rag-design.md`
+- [ ] **Threat feed ingestion** — Auto-ingest attack patterns from 12+ feeds (Garak, OWASP, JailbreakBench, arXiv, HuggingFace advisory). **Effort**: 4d. **Source**: `na0s-threat-intel-rag-design.md`
+- [ ] **Session context memory** — Multi-turn tracking: detect escalation patterns across conversation turns (benign→probing→attack). **Effort**: 3d. **Source**: `openclaw-memory-to-na0s.md` + `sec504-to-na0s-design.md` (L22)
+- [ ] **ScanGateway HTTP API** — FastAPI/Flask wrapper exposing `scan()` as REST endpoint with rate limiting, auth, async. **Effort**: 3d. **Source**: `openclaw-agents-to-na0s.md`
+- [ ] **SkillScanner** — Static analysis of code blocks in prompts: detects `eval()`, `exec()`, shell commands, SQL injection in code fences. **Effort**: 3d. **Source**: `openclaw-plugins-to-na0s.md`
+- [ ] **L24 SprayDetector** — Detect prompt spray attacks: same payload across multiple sessions. Stateful sliding window. **Effort**: 2d. **Source**: `sec504-to-na0s-design.md`
+- [ ] **L21 ExfilChannel** — Detect encoded data exfiltration in LLM outputs: base64 blobs, hex payloads, steganographic patterns. **Effort**: 3d. **Source**: `sec504-to-na0s-design.md`
+
+### P3 — Architecture Overhauls (2-4 weeks each)
+
+- [ ] **Expert Council** — Replace linear cascade with 8 parallel specialized experts + synthesizer with confidence-weighted voting. **Effort**: 3-4w. **Source**: `na0s-expert-council-design.md`
+- [ ] **Self-Hardening Pipeline** — Offline adversarial loop: generator (8 mutation strategies) → evaluator → auto-patcher → reporter. Human-in-the-loop. **Effort**: 3-4w. **Source**: `na0s-self-hardening-design.md`
+- [ ] **Full Threat Intel RAG** — Complete L15: feed ingestion + embedding store + semantic detector + auto-updater + dashboard. **Effort**: 3-4w. **Source**: `na0s-threat-intel-rag-design.md`
+- [ ] **DFIR detector suite (L21-L27)** — Full SEC504-inspired 7-layer expansion: ExfilChannel, ContextForensics, PersistenceDetect, SprayDetector, PromptSandbox, TokenForensics, SignatureDB. **Effort**: 4-6w. **Source**: `sec504-to-na0s-design.md`
+
+### Design Documents (in `.claude/memory/research/`)
+
+| Document | Focus | Layers Affected |
+|----------|-------|-----------------|
+| `na0s-threat-intel-rag-design.md` | Living threat intel system | L4, L5, L15, L18 |
+| `na0s-expert-council-design.md` | Parallel expert architecture | L6 (redesign) |
+| `na0s-self-hardening-design.md` | Adversarial self-improvement | L1, L4, L5, L13, L14 |
+| `sec504-to-na0s-design.md` | DFIR→AI 7-layer expansion | L21-L27 (new) |
+| `openclaw-security-to-na0s.md` | Boundary markers, homoglyphs | L0, L1, L10, L18 |
+| `openclaw-routing-to-na0s.md` | Scan cache, early exit | L6 |
+| `openclaw-memory-to-na0s.md` | FP memory, adaptive thresholds | L6, L16 |
+| `openclaw-plugins-to-na0s.md` | SkillScanner, chunking, egress | L1, L9, L17 |
+| `openclaw-agents-to-na0s.md` | Config, hooks, gateway | Infrastructure |
+
+---
