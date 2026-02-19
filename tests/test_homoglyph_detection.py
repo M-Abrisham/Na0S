@@ -26,6 +26,7 @@ import unittest
 
 # Timeout workaround for signal-based timeout in predict.py
 os.environ.setdefault("SCAN_TIMEOUT_SEC", "0")
+os.environ["L0_FINGERPRINT_STORE"] = ":memory:"
 
 # ---------------------------------------------------------------------------
 # Import the implementation under test.

@@ -67,6 +67,7 @@ import unittest
 # in the main thread (safe_regex requirement).  Must be set BEFORE
 # importing predict, since timeout.py reads env vars at import time.
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
+os.environ["L0_FINGERPRINT_STORE"] = ":memory:"
 
 # Verify model files exist before importing anything heavy
 from na0s.models import get_model_path

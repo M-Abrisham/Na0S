@@ -42,6 +42,7 @@ import unittest
 
 # --- Import boilerplate (matches test_scan_integration.py) ---
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
+os.environ["L0_FINGERPRINT_STORE"] = ":memory:"
 
 from na0s.models import get_model_path
 _MODEL_PATH = get_model_path("model.pkl")

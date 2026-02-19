@@ -54,6 +54,7 @@ import unittest
 
 # -- Path and environment setup (MUST precede predict import) ----------------
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
+os.environ["L0_FINGERPRINT_STORE"] = ":memory:"
 
 # -- Model availability check -----------------------------------------------
 from na0s.models import get_model_path

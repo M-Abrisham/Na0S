@@ -35,6 +35,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 # Must be set BEFORE importing predict/cascade, since timeout.py reads env
 # vars at import time.
 os.environ["SCAN_TIMEOUT_SEC"] = "0"
+os.environ["L0_FINGERPRINT_STORE"] = ":memory:"
 
 # Check if model files exist
 from na0s.models import get_model_path

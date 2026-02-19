@@ -71,7 +71,7 @@ else:
 
 def _reset_fingerprint_store():
     """Reset FingerprintStore singleton for test isolation."""
-    import layer0.tokenization as _tok
+    import na0s.layer0.tokenization as _tok
     _tok._default_store = None
 
 

@@ -112,16 +112,37 @@ class TestPipelineTimeoutConstants(unittest.TestCase):
         self.assertGreater(L0_PIPELINE_TIMEOUT, 0)
 
     def test_scan_timeout_is_positive(self):
-        self.assertIsInstance(SCAN_TIMEOUT, float)
-        self.assertGreater(SCAN_TIMEOUT, 0)
+        # Re-read from env to test the default, not a value cached
+        # by another test file that set SCAN_TIMEOUT_SEC=0 before import.
+        import importlib
+        import na0s.layer0.timeout as _timeout_mod
+        old = os.environ.pop("SCAN_TIMEOUT_SEC", None)
+        try:
+            importlib.reload(_timeout_mod)
+            self.assertIsInstance(_timeout_mod.SCAN_TIMEOUT, float)
+            self.assertGreater(_timeout_mod.SCAN_TIMEOUT, 0)
+        finally:
+            if old is not None:
+                os.environ["SCAN_TIMEOUT_SEC"] = old
+                importlib.reload(_timeout_mod)
 
     def test_pipeline_timeout_default(self):
         # Default is 30s unless overridden by env var
         self.assertGreaterEqual(L0_PIPELINE_TIMEOUT, 1.0)
 
     def test_scan_timeout_default(self):
-        # Default is 60s unless overridden by env var
-        self.assertGreaterEqual(SCAN_TIMEOUT, 1.0)
+        # Re-read from env to test the default, not a value cached
+        # by another test file that set SCAN_TIMEOUT_SEC=0 before import.
+        import importlib
+        import na0s.layer0.timeout as _timeout_mod
+        old = os.environ.pop("SCAN_TIMEOUT_SEC", None)
+        try:
+            importlib.reload(_timeout_mod)
+            self.assertGreaterEqual(_timeout_mod.SCAN_TIMEOUT, 1.0)
+        finally:
+            if old is not None:
+                os.environ["SCAN_TIMEOUT_SEC"] = old
+                importlib.reload(_timeout_mod)
 
 
 class TestSanitizerTimeoutIntegration(unittest.TestCase):
