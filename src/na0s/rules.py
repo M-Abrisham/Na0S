@@ -5,6 +5,43 @@ from dataclasses import dataclass, field
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 
 # ---------------------------------------------------------------------------
+# Angle-bracket homoglyph folding
+# ---------------------------------------------------------------------------
+# Unicode has 12+ characters that LOOK like < and > but are different
+# codepoints, allowing attackers to write ＜system＞ or 〈system〉 to
+# bypass rules that only match ASCII < and >.
+#
+# We fold all visual equivalents to ASCII before running rules.
+# This protects: xml_role_tags, fake_system_prompt, chat_template_injection.
+# ---------------------------------------------------------------------------
+_LEFT_ANGLE_HOMOGLYPHS = (
+    "\u3008",  # 〈 LEFT ANGLE BRACKET
+    "\uFF1C",  # ＜ FULLWIDTH LESS-THAN SIGN
+    "\u2039",  # ‹ SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+    "\u276C",  # ❬ MEDIUM LEFT-POINTING ANGLE BRACKET ORNAMENT
+    "\u27E8",  # ⟨ MATHEMATICAL LEFT ANGLE BRACKET
+    "\uFE64",  # ﹤ SMALL LESS-THAN SIGN
+)
+_RIGHT_ANGLE_HOMOGLYPHS = (
+    "\u3009",  # 〉 RIGHT ANGLE BRACKET
+    "\uFF1E",  # ＞ FULLWIDTH GREATER-THAN SIGN
+    "\u203A",  # › SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+    "\u276D",  # ❭ MEDIUM RIGHT-POINTING ANGLE BRACKET ORNAMENT
+    "\u27E9",  # ⟩ MATHEMATICAL RIGHT ANGLE BRACKET
+    "\uFE65",  # ﹥ SMALL GREATER-THAN SIGN
+)
+_ANGLE_FOLD_TABLE = str.maketrans(
+    "".join(_LEFT_ANGLE_HOMOGLYPHS) + "".join(_RIGHT_ANGLE_HOMOGLYPHS),
+    "<" * len(_LEFT_ANGLE_HOMOGLYPHS) + ">" * len(_RIGHT_ANGLE_HOMOGLYPHS),
+)
+
+
+def _fold_angle_homoglyphs(text: str) -> str:
+    """Fold Unicode angle bracket look-alikes to ASCII < and >."""
+    return text.translate(_ANGLE_FOLD_TABLE)
+
+
+# ---------------------------------------------------------------------------
 # Paranoia Level System
 # ---------------------------------------------------------------------------
 # PL1 (1): Production  — highest confidence, lowest FP risk (default)
@@ -481,6 +518,35 @@ RULES = [
          severity="critical",
          paranoia_level=1,
          description="Self-replicating worm instruction pattern (Morris II)"),
+
+    # 20. T1.2 Destructive action injection: Instructs the LLM to execute
+    #     destructive commands (rm -rf, DROP TABLE, format, del /f, etc.).
+    #     Covers filesystem destruction, database deletion, and OS commands.
+    #     NOT context-suppressible: destructive commands in user input are
+    #     always suspicious regardless of framing.
+    Rule("destructive_action",
+         r"(?:"
+         # Filesystem destruction: rm -rf, del /f /s, format C:
+         r"(?:rm|remove)\s+(?:-[a-z]*)?(?:r|f)[a-z]*\s+(?:/|~|\.\.|[A-Za-z]:)"
+         r"|del\s+/[fs]\b"
+         r"|format\s+[A-Za-z]:"
+         r"|(?:mkfs|shred|wipefs)\s"
+         r"|"
+         # Database destruction: DROP TABLE/DATABASE, TRUNCATE, DELETE FROM
+         r"(?:DROP|TRUNCATE)\s+(?:TABLE|DATABASE|SCHEMA|INDEX)\b"
+         r"|DELETE\s+FROM\s+\w"
+         r"|"
+         # Process/service destruction: kill -9, shutdown, halt
+         r"(?:kill\s+-9|killall|pkill\s+-9)\s"
+         r"|(?:shutdown|halt|poweroff)\s+(?:-[a-z]|now)"
+         r"|"
+         # Git destruction: force push, reset --hard, clean -fd
+         r"git\s+(?:push\s+--force|reset\s+--hard|clean\s+-[a-z]*f)"
+         r")",
+         technique_ids=["T1.2"],
+         severity="critical",
+         paranoia_level=1,
+         description="Destructive command injection (rm -rf, DROP TABLE, etc.)"),
 
     # ------------------------------------------------------------------
     # E1 Prompt Extraction & P1 Privacy Leakage — 10 new rules
@@ -990,15 +1056,19 @@ def rule_score_detailed(text):
 
     Context-aware: same suppression logic as rule_score().
     Paranoia-aware: skips rules whose paranoia_level > _PARANOIA_LEVEL.
+    Homoglyph-aware: folds Unicode angle brackets to ASCII before matching.
     """
-    has_context = _has_contextual_framing(text)
+    # Fold Unicode angle bracket look-alikes BEFORE matching.
+    # This prevents bypass via ＜system＞, 〈system〉, etc.
+    folded = _fold_angle_homoglyphs(text)
+    has_context = _has_contextual_framing(folded)
     hits = []
     for rule in RULES:
         # Paranoia filtering: skip rules above the configured threshold
         if rule.paranoia_level > _PARANOIA_LEVEL:
             continue
         try:
-            matched = safe_search(rule._compiled, text, timeout_ms=100)
+            matched = safe_search(rule._compiled, folded, timeout_ms=100)
         except RegexTimeoutError:
             # Timeout is treated as a match -- adversarial input that
             # causes backtracking is inherently suspicious.
@@ -1007,7 +1077,7 @@ def rule_score_detailed(text):
             continue
         if has_context and rule.name in _CONTEXT_SUPPRESSIBLE:
             continue
-        if rule.name == "roleplay" and _is_legitimate_roleplay(text):
+        if rule.name == "roleplay" and _is_legitimate_roleplay(folded):
             continue
         hits.append(RuleHit(
             name=rule.name,

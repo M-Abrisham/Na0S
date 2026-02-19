@@ -133,11 +133,11 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 ## Layer 1: IOC / Signature Rules Engine
 
 **Files**: `src/rules.py`
-**Tests**: `tests/test_rules.py` (90+ tests)
-**Status**: Active — 23 rules covering ~24 technique IDs (~22.2%) with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules
+**Tests**: `tests/test_rules.py` (176 tests)
+**Status**: Active — 42 rules covering ~30+ technique IDs with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules, angle bracket homoglyph bypass protection, destructive action detection
 
 ### Updated Description
-Layer 1 is a regex-based signature engine that detects known attack patterns. Has 23 pre-compiled rules (5 original + 13 roadmap + 5 novel) with paranoia level filtering (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL). All 6 bugs fixed (technique mismap, duplicate eval, severity underrating, DRY violation, raw-text-only, pattern divergence). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (educational/question/quoting/code/narrative frames) prevents FPs on legitimate security discussions. All patterns are ReDoS-safe. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass (raw + sanitized text).
+Layer 1 is a regex-based signature engine that detects known attack patterns. Has 42 pre-compiled rules (5 original + 13 roadmap + 5 novel + 10 E1/P1 extraction + 7 O1/O2 content-safety + 1 worm + 1 destructive) with paranoia level filtering (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL). All 6 bugs fixed (technique mismap, duplicate eval, severity underrating, DRY violation, raw-text-only, pattern divergence). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (educational/question/quoting/code/narrative frames) prevents FPs on legitimate security discussions. All patterns are ReDoS-safe. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass (raw + sanitized text). Unicode angle bracket homoglyph folding (12 variants) protects all XML/chat-template rules from bypass.
 
 ### TODO List
 
@@ -183,6 +183,10 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 - [x] C1.1 Constraint-negation: `constraint_negation` rule, PL1 — detects "disable safety filters", "without restrictions", "unrestricted mode" (catches DAN, Skeleton Key)
 - [x] E2.3-5 Meta-referential: `meta_referential` rule, PL2 — detects "your hidden prompt", "what model are you", "your training data"
 - [x] D2.3 Gaslighting: `gaslighting` rule, PL2 — detects "you already told me", "stop pretending", "I know you can"
+
+**Security Hardening (from OpenClaw research):** DONE (2026-02-19)
+- [x] **Angle bracket homoglyph bypass fix** — `_fold_angle_homoglyphs()` normalizes 12 Unicode look-alike characters (U+3008 〈, U+FF1C ＜, U+27E8 ⟨, U+FE64 ﹤, U+276C ❬, U+2039 ‹ + right variants) to ASCII `<>` before rule matching. Protects `xml_role_tags`, `fake_system_prompt`, `chat_template_injection` from bypass. 16 tests in `test_rules.py`. **Priority**: P0-CRITICAL. ✅ DONE (2026-02-19)
+- [x] **T1.2 Destructive action injection** — `destructive_action` rule, PL1, severity critical. Detects `rm -rf /`, `DROP TABLE`, `TRUNCATE TABLE`, `DELETE FROM`, `kill -9`, `shutdown now`, `git push --force`, `git reset --hard`, `format C:`. 18 tests. **Priority**: P0. ✅ DONE (2026-02-19)
 
 **Medium Priority (P2):**
 - [ ] D1.14 Hypothetical-response-priming (high FP risk — needs careful tuning)
@@ -256,7 +260,7 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 - [ ] Binary encoding ← covered in NEW above
 - [ ] Morse code ← covered in NEW above
 - [ ] Whitespace injection ← partially in L0, stego variant in NEW
-- [ ] Unicode homoglyphs ← in L0 (Cyrillic confusables)
+- [x] Unicode homoglyphs — angle bracket homoglyphs folded in L1 rules.py (2026-02-19); Cyrillic confusables handled in L0
 - [ ] Invisible chars ← done in L0
 
 ### Hardcoded Values to Externalize
@@ -476,7 +480,7 @@ Layer 5 is an alternative ML classifier using sentence-transformer embeddings (`
 - [ ] **FIX-L5-11 (LOW)**: `classify_prompt_embedding()` docstring references `ClassifierOutput.from_tuple()` that doesn't exist (line 136). **Fix**: Remove or implement.
 
 #### NEW (Discovered by research)
-- [ ] **Ensemble with TF-IDF** — Combine L4 (TF-IDF) and L5 (embeddings) predictions. Options: averaging, stacking, Bayesian decision fusion. TF-IDF catches keyword patterns; embeddings catch semantic similarity. **Priority**: P0. **Effort**: Medium.
+- [x] **Ensemble with TF-IDF** — Combine L4 (TF-IDF) and L5 (embeddings) predictions via weighted average in `src/na0s/ensemble.py`. Configurable weights (default 50/50, env var `NA0S_ENSEMBLE_TFIDF_WEIGHT`). Graceful degradation to TF-IDF-only when embeddings unavailable. Wired into cascade.py via `enable_ensemble` parameter. 58 tests in `tests/test_ensemble.py`. **Priority**: P0. ✅ DONE (2026-02-18)
 - [ ] **Structural feature concatenation** — Append L3's 24 features to 384-dim embedding → 408-dim input to classifier. **Priority**: P1. **Effort**: Easy.
 - [ ] **Contrastive learning** — Fine-tune embedding model on injection/safe pairs. Brings similar attacks closer in embedding space. **Priority**: P2.
 - [ ] **Knowledge distillation** — Train small fast model to mimic ensemble of TF-IDF + embeddings. **Priority**: P2.
@@ -492,7 +496,7 @@ Layer 5 is an alternative ML classifier using sentence-transformer embeddings (`
 - [x] **Wire into cascade.py** — Add `EmbeddingClassifier` stage to cascade pipeline. Currently no placeholder exists. **Priority**: P0. ✅ DONE (2026-02-14) — 60/40 blending with weighted classifier
 - [ ] **Stratified train/test split** — model_embedding.py uses stratified split; verify and maintain. **Priority**: P1.
 - [ ] **Model selection** — Benchmark `all-MiniLM-L6-v2` vs `bge-small-en-v1.5` vs `gte-small` for injection detection. **Priority**: P1.
-- [ ] **Fallback mechanism** — If embedding model fails to load, fall back to TF-IDF-only pipeline. **Priority**: P1.
+- [x] **Fallback mechanism** — If embedding model fails to load, fall back to TF-IDF-only pipeline. **Priority**: P1. ✅ DONE (2026-02-18) — Built into `ensemble.py` via `_HAS_EMBEDDING` flag and try/except in `ensemble_scan()`.
 
 ### Hardcoded Values to Externalize
 | Value | File:Line | Current | Recommendation |
