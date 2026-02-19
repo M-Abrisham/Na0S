@@ -78,8 +78,10 @@ class TestYAMLLoadErrorHandling(unittest.TestCase):
     def test_missing_file_raises_file_not_found(self):
         import scripts.taxonomy._base as mod
         orig = mod._TAXONOMY_PATH
+        # Use a path within data/ that doesn't exist (passes containment check)
+        data_dir = mod._PROJECT_ROOT / "data"
         try:
-            mod._TAXONOMY_PATH = mod.Path("/nonexistent/taxonomy.yaml")
+            mod._TAXONOMY_PATH = data_dir / "nonexistent_taxonomy.yaml"
             clear_taxonomy_cache()
             with self.assertRaises(FileNotFoundError):
                 _load_taxonomy()
@@ -89,7 +91,9 @@ class TestYAMLLoadErrorHandling(unittest.TestCase):
     def test_malformed_yaml_raises_value_error(self):
         import scripts.taxonomy._base as mod
         orig = mod._TAXONOMY_PATH
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        data_dir = str(mod._PROJECT_ROOT / "data")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml",
+                                        dir=data_dir, delete=False) as f:
             f.write(": :\n  bad: [unterminated")
             tmp = f.name
         try:
@@ -97,7 +101,7 @@ class TestYAMLLoadErrorHandling(unittest.TestCase):
             clear_taxonomy_cache()
             with self.assertRaises(ValueError) as ctx:
                 _load_taxonomy()
-            self.assertIn("Cannot read taxonomy YAML", str(ctx.exception))
+            self.assertIn("Invalid YAML in", str(ctx.exception))
         finally:
             mod._TAXONOMY_PATH = orig
             os.unlink(tmp)
@@ -105,7 +109,9 @@ class TestYAMLLoadErrorHandling(unittest.TestCase):
     def test_missing_categories_key_raises_value_error(self):
         import scripts.taxonomy._base as mod
         orig = mod._TAXONOMY_PATH
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        data_dir = str(mod._PROJECT_ROOT / "data")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml",
+                                        dir=data_dir, delete=False) as f:
             f.write("version: '1.0'\nsome_other_key: {}\n")
             tmp = f.name
         try:
@@ -229,7 +235,9 @@ class TestTaxonomyPathOverride(unittest.TestCase):
 
     def test_env_var_override_loads_alternate_file(self):
         import scripts.taxonomy._base as mod
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        data_dir = str(mod._PROJECT_ROOT / "data")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml",
+                                        dir=data_dir, delete=False) as f:
             f.write("version: 'test'\ncategories:\n  D1:\n    name: TestCat\n")
             tmp = f.name
         orig = mod._TAXONOMY_PATH

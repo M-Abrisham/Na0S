@@ -20,7 +20,8 @@ import os
 import sys
 
 import pandas as pd
-import yaml
+
+from scripts.safe_yaml import safe_load_yaml
 
 # Optional — gracefully degrade if not installed
 try:
@@ -154,8 +155,7 @@ def _download_huggingface(cfg, output_path):
 
 
 def sync(force=False, only=None):
-    with open(REGISTRY_PATH, "r") as f:
-        registry = yaml.safe_load(f)
+    registry = safe_load_yaml(REGISTRY_PATH)
 
     output_dir = os.path.join(ROOT, registry.get("output_dir", "data/raw"))
     sources = registry.get("sources", {})

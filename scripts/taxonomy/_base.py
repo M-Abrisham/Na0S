@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from scripts.safe_yaml import safe_load_yaml
 
 
 @dataclass
@@ -87,21 +87,44 @@ def _load_taxonomy():
         if _taxonomy_cache is not None:
             return _taxonomy_cache
         path = _TAXONOMY_PATH
-        if not path.exists():
-            raise FileNotFoundError(
-                "Taxonomy file not found: {}".format(path)
-            )
-        try:
-            with path.open("r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-        except (yaml.YAMLError, UnicodeDecodeError) as exc:
+
+        # Path-containment check — prevent path traversal via env var
+        resolved = path.resolve()
+        allowed = (_PROJECT_ROOT / "data").resolve()
+        if not str(resolved).startswith(str(allowed) + os.sep) and resolved != allowed:
             raise ValueError(
-                "Cannot read taxonomy YAML ({}): {}".format(path, exc)
-            ) from exc
+                "TAXONOMY_YAML_PATH must be within data/ directory, "
+                "got: {}".format(resolved)
+            )
+
+        data = safe_load_yaml(path)
         if not isinstance(data, dict) or "categories" not in data:
             raise ValueError(
                 "Taxonomy YAML missing 'categories' key: {}".format(path)
             )
+
+        # Schema validation — each category must be a dict with a 'name' key
+        categories = data["categories"]
+        if not isinstance(categories, dict):
+            raise ValueError(
+                "Taxonomy 'categories' must be a dict, got {}: {}".format(
+                    type(categories).__name__, path
+                )
+            )
+        for cat_id, cat in categories.items():
+            if not isinstance(cat, dict):
+                raise ValueError(
+                    "Category '{}' must be a dict, got {}: {}".format(
+                        cat_id, type(cat).__name__, path
+                    )
+                )
+            if "name" not in cat:
+                raise ValueError(
+                    "Category '{}' missing required 'name' field: {}".format(
+                        cat_id, path
+                    )
+                )
+
         _taxonomy_cache = data
     return _taxonomy_cache
 

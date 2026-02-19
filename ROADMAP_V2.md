@@ -159,7 +159,7 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 - [x] **FIX-6: Pattern divergence** — roleplay rule unified with cascade.py's `ROLE_ASSIGNMENT` (now uses compiled pattern from RULES list). ✅ DONE
 
 #### NEW (Rules to add — from research)
-- [ ] **Create `WormSignatureDetector`** — Detect self-replicating prompt patterns: action + self-replication structural signatures, recursive instruction depth. Input-side detection complement to L9's output-side PropagationScanner. Source: IM0006 Coverage Gap #8. **Priority**: P0. **Effort**: Medium.
+- [x] **Create `WormSignatureDetector`** — Detect self-replicating prompt patterns: action + self-replication structural signatures, recursive instruction depth. Input-side detection complement to L9's output-side PropagationScanner. Source: IM0006 Coverage Gap #8. **Priority**: P0. **Effort**: Medium. DONE (2026-02-18) -- worm_signature rule added to rules.py (technique I1.5, severity critical, PL1, 4 sub-patterns: direct propagation, recursive instruction, forward/spread, template replication).
 **Critical Priority (P0):** DONE (2026-02-18)
 - [x] D3.1 Fake-system-prompt: `fake_system_prompt` rule, PL1 — detects [SYSTEM], [INST], <<SYS>>, <|im_start|>system
 - [x] D3.2 Chat-template-injection: `chat_template_injection` rule, PL1 — detects ChatML/Llama/Anthropic-style tokens
@@ -879,9 +879,9 @@ Layer 10 plants decoy tokens (honeytokens) in system prompts. If a canary appear
 
 ## Layer 11: Supply Chain Integrity
 
-**Files**: `src/safe_pickle.py` (57 lines)
-**Tests**: None
-**Status**: Partially implemented — ACTIVELY USED (9 files, 20+ calls) but cryptographically weak
+**Files**: `src/safe_pickle.py` (57 lines), `scripts/safe_yaml.py` (77 lines)
+**Tests**: `tests/test_safe_yaml.py` (80 tests)
+**Status**: Partially implemented — safe_pickle ACTIVELY USED (9 files, 20+ calls) but cryptographically weak; safe_yaml COMPLETE with hardened loading, path containment, schema validation
 
 ### Updated Description
 Layer 11 provides SHA-256 sidecar integrity checking for pickle serialization. On save, computes SHA-256 hash and writes to `{path}.sha256`. On load, verifies hash matches before deserializing. Used by all model persistence code (model.py, features.py, predict.py, cascade.py, predict_embedding.py, model_embedding.py, features_embedding.py, mine_hard_negatives.py, optimize_threshold.py). Protects against accidental corruption and bitflips but **NOT** against attacker with file write access (can modify both `.pkl` and `.pkl.sha256`). Missing: HMAC authentication, encryption, version metadata, audit logging, file permissions.
@@ -894,6 +894,11 @@ Layer 11 provides SHA-256 sidecar integrity checking for pickle serialization. O
 - [x] Chunked SHA-256 hashing (64KB chunks) — efficient for large files
 - [x] FileNotFoundError on missing sidecar, ValueError on hash mismatch
 - [x] Integrated into 9 files (model.py, features.py, predict.py, cascade.py, predict_embedding.py, model_embedding.py, features_embedding.py, mine_hard_negatives.py, optimize_threshold.py)
+- [x] **PyYAML hardening** (2026-02-18) — Created `scripts/safe_yaml.py` with hardened YAML loading. Security controls: `yaml.safe_load()` only (CWE-502), 10 MB file-size limit (billion-laughs DoS), path validation, UTF-8-SIG encoding (BOM-safe), clean error wrapping. Migrated `_base.py` and `sync_datasets.py` from raw `yaml.safe_load()` to centralized `safe_load_yaml()`.
+- [x] **Path-containment validation** (2026-02-18) — `_load_taxonomy()` now validates `TAXONOMY_YAML_PATH` env var resolves within `PROJECT_ROOT/data/`. Blocks path traversal, symlink escape, and arbitrary file reads.
+- [x] **Taxonomy schema validation** (2026-02-18) — Categories must be dicts with a `name` key. Rejects malformed YAML that only had a `categories` key.
+- [x] **PyYAML version pinning** (2026-02-18) — Tightened from `>=6.0` to `>=6.0.1,<7` in pyproject.toml and requirements.txt. 6.0.1 fixes Cython build issues; <7 prevents surprise major bumps. All 3 CVEs (CVE-2017-18342, CVE-2020-1747, CVE-2020-14343) patched in 5.4+.
+- [x] **80 PyYAML security tests** (2026-02-18) — `tests/test_safe_yaml.py`: 10 test classes covering malicious YAML tags, billion laughs, large file DoS, Unicode BOM, taxonomy import chain, path traversal, schema validation, safe_load_yaml helper, safe vs unsafe loader comparison, docstring verification.
 
 #### FIXES
 - [ ] **BUG-L11-1 (HIGH)**: No cryptographic authentication — SHA-256 alone doesn't prevent attacker from replacing both `.pkl` and `.pkl.sha256`. **Fix**: Use HMAC-SHA256 with environment-variable secret key.
