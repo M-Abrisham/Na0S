@@ -717,12 +717,12 @@ Layer 8 validates that input looks like a legitimate user prompt through 5 multi
 
 #### FIXES
 - [x] **BUG-L8-1 (HIGH)**: ORPHANED — zero imports from any pipeline code. 467 lines of dead code. **Fix**: Wire into cascade.py as Stage 2.5 (after ML, before judge) or into predict.py as post-classification filter. ✅ DONE (2026-02-14) — wired into cascade.py for post-classification FP reduction
-- [ ] **BUG-L8-2 (HIGH)**: No Layer 0 integration — receives raw unsanitized text. **Fix**: Accept sanitized text from L0.
-- [ ] **BUG-L8-3 (MEDIUM)**: Coherence check alpha_ratio 30% threshold — rejects legitimate code snippets, JSON, URLs, log output. **Fix**: Adjust threshold per task_type (coding → 15%, general → 30%).
-- [ ] **BUG-L8-4 (MEDIUM)**: Contradiction detection window `{1,40}` too narrow — attacks can space contradictions further apart. **Fix**: Widen window or use sentence-level detection.
-- [ ] **BUG-L8-5 (MEDIUM)**: Persona override patterns not shared with rules.py — 11 patterns in positive_validation.py, different patterns in rules.py and cascade.py. Triple maintenance. **Fix**: Consolidate into shared pattern library.
-- [ ] **BUG-L8-6 (LOW)**: Coherence avg_word_len threshold of 45 — arbitrary, no justification. Long technical words (cryptocurrency, authentication) are normal. **Fix**: Raise or use per-task thresholds.
-- [ ] **BUG-L8-7 (LOW)**: No error handling for non-string input — `text.split()` will crash on None. **Fix**: Add type guard.
+- [x] **BUG-L8-2 (HIGH)**: No Layer 0 integration — receives raw unsanitized text. **Fix**: Accept sanitized text from L0. ✅ DONE (2026-02-19) — validate() accepts optional sanitized_text param; cascade.py passes L0-cleaned text
+- [x] **BUG-L8-3 (MEDIUM)**: Coherence check alpha_ratio 30% threshold — rejects legitimate code snippets, JSON, URLs, log output. **Fix**: Adjust threshold per task_type (coding → 15%, general → 30%). ✅ DONE (2026-02-19) — per-task _ALPHA_RATIO_THRESHOLDS dict
+- [x] **BUG-L8-4 (MEDIUM)**: Contradiction detection window `{1,40}` too narrow — attacks can space contradictions further apart. **Fix**: Widen window or use sentence-level detection. ✅ DONE (2026-02-19) — widened to {1,500} + added sentence-level contradiction detection
+- [x] **BUG-L8-5 (MEDIUM)**: Persona override patterns not shared with rules.py — 11 patterns in positive_validation.py, different patterns in rules.py and cascade.py. Triple maintenance. **Fix**: Consolidate into shared pattern library. ✅ DONE (2026-02-19) — rules.py is single source of truth; PERSONA_OVERRIDE_PATTERNS + ROLE_ASSIGNMENT_PATTERN imported everywhere
+- [x] **BUG-L8-6 (LOW)**: Coherence avg_word_len threshold of 45 — arbitrary, no justification. Long technical words (cryptocurrency, authentication) are normal. **Fix**: Raise or use per-task thresholds. ✅ DONE (2026-02-19) — lowered to 25 (general) / 35 (coding) with per-task _AVG_WORD_LEN_THRESHOLDS
+- [x] **BUG-L8-7 (LOW)**: No error handling for non-string input — `text.split()` will crash on None. **Fix**: Add type guard. ✅ DONE (2026-02-19) — type guards on validate(), wrap_system_prompt(), extract_user_input()
 
 #### NEW (Discovered by research)
 - [ ] **Taxonomy mapping** — Map validation failures to technique IDs. Persona override → D2.x, system prompt markers → D3.x, low coherence → D4.x (obfuscation). **Priority**: P0.

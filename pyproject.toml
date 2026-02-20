@@ -77,13 +77,14 @@ dev = [
     "coverage>=7.0",
     "flake8>=6.0",
     "hypothesis>=6.0",
+    "langdetect>=0.1.1",
     "pytest>=7.0",
     "PyYAML>=6.0.1,<7",
 ]
 
 [project.urls]
-Repository = "https://github.com/mehrnoosh-a/Na0S"
-Issues = "https://github.com/mehrnoosh-a/Na0S/issues"
+Repository = "https://github.com/M-Abrisham/Na0S"
+Issues = "https://github.com/M-Abrisham/Na0S/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

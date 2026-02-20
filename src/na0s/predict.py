@@ -1,4 +1,66 @@
+# ---------------------------------------------------------------------------
+# TODO(Issue #2): predict.py / cascade.py weighted-voting duplication
+#
+# Both modules independently implement the same classification pipeline:
+#   1. ML prediction   (predict() vs WeightedClassifier.classify())
+#   2. Rule scoring    (classify_prompt() vs WeightedClassifier.classify())
+#   3. Obfuscation     (classify_prompt() vs WeightedClassifier.classify())
+#   4. Weighted voting (_weighted_decision() vs WeightedClassifier threshold)
+#
+# KEY DIFFERENCES that make blind consolidation risky:
+#
+#   ML probability extraction:
+#     - predict.py uses model.predict_proba(X)[0][prediction], i.e. the
+#       probability of whichever class was predicted, then _weighted_decision
+#       flips it via `1.0 - ml_prob` when the label is SAFE.
+#     - cascade.py (WeightedClassifier) uses proba[1] directly — always
+#       the probability of the malicious class (index 1).
+#     These produce the SAME number only when class order is [safe, mal].
+#     If a retrained model has a different class order, they would diverge.
+#
+#   Rule execution:
+#     - predict.py's classify_prompt() runs rules on BOTH sanitized AND raw
+#       text, then unions the results (dual-surface detection).
+#     - cascade.py's WeightedClassifier.classify() runs rules only on the
+#       sanitized text passed to it.
+#
+#   Structural features (Layer 3):
+#     - predict.py's _weighted_decision() accepts an optional `structural`
+#       dict and adds weight for imperative_start, role_assignment, etc.
+#     - cascade.py's WeightedClassifier has no structural feature support.
+#
+#   Override protection:
+#     - predict.py checks `severities_seen <= {"medium"}` (set comparison).
+#     - cascade.py checks `max_severity == "medium"` (string comparison).
+#     These are semantically equivalent when only one severity fires, but
+#     predict.py's version is more robust for multiple hits.
+#
+#   Score clamping:
+#     - predict.py does NOT clamp composite to [0, 1].
+#     - cascade.py clamps: `max(0.0, min(1.0, final_score))`.
+#
+#   Decoded-view classification:
+#     - predict.py's classify_prompt() classifies each obfuscation
+#       decoded_view through the ML model; if any is malicious it adds a
+#       synthetic "decoded_payload_malicious" critical hit.
+#     - cascade.py does NOT classify decoded views.
+#
+# IDEAL CONSOLIDATION (do NOT implement without full test coverage):
+#   Extract a shared _core_weighted_vote(ml_prob_malicious, detailed_hits,
+#   obfuscation_flags, structural=None, threshold=0.55) function into a
+#   new na0s/_voting.py module.  Both predict._weighted_decision() and
+#   WeightedClassifier.classify() would delegate to it.  The ML probability
+#   extraction would stay in each caller since it depends on how the model
+#   was invoked.  The dual-surface rule execution in classify_prompt() is
+#   an enrichment step that happens BEFORE voting and would remain in
+#   predict.py.
+#
+# BLOCKED ON: 1700+ existing tests must pass.  Consolidation should be
+# done behind a feature flag or with A/B score comparison first.
+# ---------------------------------------------------------------------------
+
 import sqlite3
+import threading
 
 from .layer0 import layer0_sanitize, register_malicious
 from .layer0.timeout import (
@@ -26,8 +88,53 @@ DECISION_THRESHOLD = 0.55
 # Canonical SEVERITY_WEIGHTS imported from rules.py (DRY)
 _SEVERITY_WEIGHTS = SEVERITY_WEIGHTS
 
-# Build a lookup from rule name -> severity for quick access
+# ---------------------------------------------------------------------------
+# Thread-safe model cache — avoids re-reading ~420KB from disk + SHA-256
+# verification on every scan() call.  Uses double-checked locking so that
+# only the first caller pays the I/O cost; all subsequent callers get the
+# cached (vectorizer, model) tuple instantly.
+# ---------------------------------------------------------------------------
+_cached_vectorizer = None
+_cached_model = None
+_model_cache_lock = threading.Lock()
+
+
+def _get_cached_models():
+    """Return (vectorizer, model), loading from disk only on first call.
+
+    Thread-safe via double-checked locking (check-lock-check pattern).
+    """
+    global _cached_vectorizer, _cached_model
+    if _cached_vectorizer is not None and _cached_model is not None:
+        return _cached_vectorizer, _cached_model
+    with _model_cache_lock:
+        # Re-check after acquiring the lock — another thread may have loaded
+        # while we were waiting.
+        if _cached_vectorizer is not None and _cached_model is not None:
+            return _cached_vectorizer, _cached_model
+        import os
+        for path, label in [(VECTORIZER_PATH, "TF-IDF vectorizer"), (MODEL_PATH, "classifier model")]:
+            if not os.path.isfile(path):
+                raise RuntimeError(
+                    f"Na0S {label} not found at {path}. "
+                    "Run the training pipeline first:\n"
+                    "  python scripts/dataset.py\n"
+                    "  python scripts/process_data.py\n"
+                    "  python scripts/features.py\n"
+                    "  python scripts/model.py\n"
+                    "Then copy the resulting .pkl files into src/na0s/models/."
+                )
+        _cached_vectorizer = safe_load(VECTORIZER_PATH)
+        _cached_model = safe_load(MODEL_PATH)
+    return _cached_vectorizer, _cached_model
+
+# Build a lookup from rule name -> severity for quick access.
+# Include synthetic rules that classify_prompt() may inject into the
+# hits list so the severity lookup never needs runtime mutation.
+# This keeps _RULE_SEVERITY effectively immutable after module load,
+# which is critical for thread-safety in multi-threaded web servers.
 _RULE_SEVERITY = {rule.name: rule.severity for rule in RULES}
+_RULE_SEVERITY["decoded_payload_malicious"] = "critical"
 
 # ---------------------------------------------------------------------------
 # Chunked analysis for long inputs (D7.1 benign-padding, D8.1 context-flooding)
@@ -67,21 +174,14 @@ def _head_tail_extract(text, head_tokens=_HEAD_TOKENS, tail_tokens=_TAIL_TOKENS)
 
 
 def predict_prompt():
-    import os
-    for path, label in [(VECTORIZER_PATH, "TF-IDF vectorizer"), (MODEL_PATH, "classifier model")]:
-        if not os.path.isfile(path):
-            raise RuntimeError(
-                f"Na0S {label} not found at {path}. "
-                "Run the training pipeline first:\n"
-                "  python scripts/dataset.py\n"
-                "  python scripts/process_data.py\n"
-                "  python scripts/features.py\n"
-                "  python scripts/model.py\n"
-                "Then copy the resulting .pkl files into src/na0s/models/."
-            )
-    vectorizer = safe_load(VECTORIZER_PATH)
-    model = safe_load(MODEL_PATH)
-    return vectorizer, model
+    """Return (vectorizer, model) — cached after first load.
+
+    Previous behaviour loaded both .pkl files from disk (with SHA-256
+    verification) on every call.  Now delegates to _get_cached_models()
+    which uses thread-safe double-checked locking so the I/O + hash
+    check happens only once per process.
+    """
+    return _get_cached_models()
 
 
 def predict(text, vectorizer, model):
@@ -97,9 +197,9 @@ def predict(text, vectorizer, model):
     prob = model.predict_proba(X)[0][prediction]
 
     if prediction == 1:
-        label = "🚨 MALICIOUS"
+        label = "MALICIOUS"
     else:
-        label = "✅ SAFE"
+        label = "SAFE"
 
     return label, prob, l0
 
@@ -141,7 +241,7 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
     for hit_name in hits:
         sev = _RULE_SEVERITY.get(hit_name, "medium")
         severities_seen.add(sev)
-        rule_weight += _SEVERITY_WEIGHTS.get(sev, 0.1)
+        rule_weight += SEVERITY_WEIGHTS.get(sev, 0.1)
 
     # --- Obfuscation signal ---
     obf_weight = min(0.15 * len(obs_flags), 0.3)
@@ -181,18 +281,18 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
             and severities_seen <= {"medium"}
             and not obs_flags
             and structural_weight == 0.0):
-        return "✅ SAFE", composite
+        return "SAFE", composite
 
     if composite >= DECISION_THRESHOLD:
-        return "🚨 MALICIOUS", composite
-    return "✅ SAFE", composite
+        return "MALICIOUS", composite
+    return "SAFE", composite
 
 
 def classify_prompt(text, vectorizer, model):
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
-        return label, prob, [], l0
+        return label, prob, [], l0, []
 
     clean = l0.sanitized_text
 
@@ -236,10 +336,11 @@ def classify_prompt(text, vectorizer, model):
 
     # If a decoded view was classified as malicious, treat it as a strong
     # signal by adding a synthetic critical-severity "hit".
+    # NOTE: "decoded_payload_malicious" is pre-registered in _RULE_SEVERITY
+    # at module level (severity "critical"), so no runtime dict mutation
+    # is needed here — important for thread-safety.
     if decoded_malicious:
         hits.append("decoded_payload_malicious")
-        # Register the synthetic rule so the severity lookup can find it.
-        _RULE_SEVERITY.setdefault("decoded_payload_malicious", "critical")
 
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
@@ -253,7 +354,7 @@ def classify_prompt(text, vectorizer, model):
         except (sqlite3.Error, OSError):
             pass  # non-critical — don't break classification
 
-    return label, composite, hits, l0
+    return label, composite, hits, l0, detailed_hits
 
 
 def scan(text, vectorizer=None, model=None):
@@ -267,7 +368,7 @@ def scan(text, vectorizer=None, model=None):
         vectorizer, model = predict_prompt()
 
     try:
-        label, prob, hits, l0 = with_timeout(
+        label, prob, hits, l0, detailed_hits = with_timeout(
             classify_prompt,
             SCAN_TIMEOUT,
             text, vectorizer, model,
@@ -538,7 +639,7 @@ if __name__ == "__main__":
 
     print("\n--- Prompt Injection Detector ---\n")
     for prompt in test_prompts:
-        label, confidence, hits, l0 = classify_prompt(prompt, vectorizer, model)
+        label, confidence, hits, l0, _detailed = classify_prompt(prompt, vectorizer, model)
 
         if l0.rejected:
             print("BLOCKED: {0} | reason: {1}".format(prompt[:50], l0.rejection_reason))

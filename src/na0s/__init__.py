@@ -19,6 +19,12 @@ Advanced multi-layer cascade::
     from na0s import CascadeClassifier
     clf = CascadeClassifier()
     label, confidence, hits, stage = clf.classify("some input")
+
+Cascade with ScanResult (same return type as scan())::
+
+    clf = CascadeClassifier()
+    result = clf.scan("some input")
+    print(result.cascade_stage)  # "whitelist", "weighted", "judge", ...
 """
 
 from na0s._version import __version__

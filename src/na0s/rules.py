@@ -94,6 +94,49 @@ class RuleHit:
     severity: str = "medium"
 
 
+# Canonical role-assignment / roleplay pattern -- single source of truth.
+# Imported by cascade.py (WhitelistFilter) and structural_features.py so
+# all three detection layers stay in sync.
+#
+# Uses \s+ for whitespace-evasion resilience and \b for word boundaries.
+ROLE_ASSIGNMENT_PATTERN = (
+    r"\byou\s+are\s+now\b"
+    r"|\bpretend\s+to\s+be\b"
+    # FIX: "act as" tightened — require article/possessive + word, or
+    # capitalized name (DAN, Jailbreak, etc.) to reduce FPs from
+    # scientific/technical prose ("enzymes act as catalysts").
+    r"|\bact\s+as\s+(?:(?:a|an|the|my|if)\s+)?\w"
+    r"|\bfrom\s+now\s+on\b"
+    r"|\b(?:your\s+)?new\s+role\b"
+)
+
+# ---------------------------------------------------------------------------
+# Persona override patterns -- consolidated single source of truth.
+# ---------------------------------------------------------------------------
+# These patterns cover the FULL set of persona/identity override attempts,
+# including role assignment, instruction override/ignore/disregard, and
+# identity hijack.  Previously duplicated across positive_validation.py,
+# cascade.py, and rules.py -- now consolidated here.
+#
+# Imported by positive_validation.py for persona boundary checks.
+# The ROLE_ASSIGNMENT_PATTERN above is a subset used by cascade.py
+# WhitelistFilter and structural_features.py for lightweight checks.
+PERSONA_OVERRIDE_PATTERNS = [
+    # Role assignment / identity hijack
+    re.compile(r"\byou\s+are\s+now\b", re.IGNORECASE),
+    re.compile(r"\byour\s+new\s+identity\b", re.IGNORECASE),
+    re.compile(r"\bfrom\s+now\s+on\s+you\s+will\b", re.IGNORECASE),
+    re.compile(r"\bfrom\s+now\s+on,?\s+you\s+(are|will|must|should)\b", re.IGNORECASE),
+    re.compile(r"\bact\s+as\s+if\s+you\s+are\b", re.IGNORECASE),
+    re.compile(r"\bpretend\s+you\s+are\b", re.IGNORECASE),
+    # Instruction override / ignore
+    re.compile(r"\bignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)\b", re.IGNORECASE),
+    re.compile(r"\bdisregard\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)\b", re.IGNORECASE),
+    re.compile(r"\boverride\s+(your|the|all)\s+(instructions|rules|system\s*prompt)\b", re.IGNORECASE),
+    re.compile(r"\byou\s+must\s+obey\b", re.IGNORECASE),
+    re.compile(r"\bforget\s+(all\s+)?(your|previous|prior)\s+(instructions|rules|training)\b", re.IGNORECASE),
+]
+
 # Severity-to-weight mapping for rule hits in weighted voting.
 # Canonical definition: import from here in predict.py and cascade.py.
 SEVERITY_WEIGHTS = {
@@ -145,9 +188,7 @@ RULES = [
          paranoia_level=1,
          description="System prompt extraction attempt"),
     Rule("roleplay",
-         # Unified pattern: covers rules.py + cascade.py WhitelistFilter patterns
-         r"\byou are now\b|\bpretend to be\b|\bact as\b"
-         r"|\bfrom now on\b|\bnew role\b",
+         ROLE_ASSIGNMENT_PATTERN,
          technique_ids=["D2.1", "D2.2"],
          severity="high",
          paranoia_level=2,
@@ -864,7 +905,6 @@ RULES = [
          description="Request for harmful substance synthesis instructions"),
 ]
 
-
 # ---------------------------------------------------------------------------
 # Context-awareness: suppress rule ENGINE hits when text discusses injection
 # rather than performing it.  ML, structural features, obfuscation flags, and
@@ -958,6 +998,23 @@ _LEGITIMATE_ROLE = re.compile(
     re.IGNORECASE,
 )
 
+# Non-persona "act as" -- scientific/technical usage where "act as" means
+# "function as" rather than "roleplay as".  Suppresses FPs from prompts
+# like "How does aspirin act as an anti-inflammatory?" or "Enzymes act as
+# catalysts in biochemical reactions."
+# Note: (?:\w+\s+)? allows one adjective between article and noun
+# (e.g., "a voltage divider").  s? handles plurals ("catalysts").
+_NONPERSONA_ACT_AS = re.compile(
+    r'\bact\s+as\s+(?:(?:a|an|the)\s+)?(?:\w+\s+)?'
+    r'(?:catalysts?|buffers?|safeguards?|barriers?|bridges?|dividers?|'
+    r'filters?|gateways?|prox(?:y|ies)|intermediar(?:y|ies)|'
+    r'deterrents?|inhibitors?|mediators?|moderators?|'
+    r'substitutes?|replacements?|stimul(?:us|i)|receptors?|'
+    r'anti[- ]?\w+|insulators?|conductors?|solvents?|reagents?|'
+    r'amplifiers?|suppressors?|regulators?|stabilizers?|precursors?)\b',
+    re.IGNORECASE,
+)
+
 
 def _has_contextual_framing(text):
     """Return True if text discusses injection rather than performing it."""
@@ -970,8 +1027,10 @@ def _has_contextual_framing(text):
 
 
 def _is_legitimate_roleplay(text):
-    """Return True if 'act as' refers to a legitimate benign role."""
-    return bool(_LEGITIMATE_ROLE.search(text))
+    """Return True if 'act as' refers to a legitimate benign role or
+    non-persona scientific/technical usage."""
+    return (bool(_LEGITIMATE_ROLE.search(text))
+            or bool(_NONPERSONA_ACT_AS.search(text)))
 
 
 # Rules that can be suppressed in educational/quoting/code/narrative context.

@@ -316,8 +316,9 @@ class TestWeightedClassifier(unittest.TestCase):
 
     def test_severity_weights_exist(self):
         """SEVERITY_WEIGHTS should cover critical, high, medium."""
+        from na0s.rules import SEVERITY_WEIGHTS
         for severity in ["critical", "high", "medium"]:
-            self.assertIn(severity, WeightedClassifier.SEVERITY_WEIGHTS)
+            self.assertIn(severity, SEVERITY_WEIGHTS)
 
     def test_ml_override_protection(self):
         """When ML is highly confident SAFE and only medium rules fire, trust ML."""

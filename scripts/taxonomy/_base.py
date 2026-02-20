@@ -25,13 +25,13 @@ class ClassifierOutput:
 
     @classmethod
     def from_tuple(cls, tup):
-        """Wrap a legacy (label, prob, hits, l0) tuple."""
-        if not isinstance(tup, (list, tuple)) or len(tup) != 4:
+        """Wrap a legacy (label, prob, hits, l0) or (label, prob, hits, l0, detailed_hits) tuple."""
+        if not isinstance(tup, (list, tuple)) or len(tup) not in (4, 5):
             raise TypeError(
-                "classify_fn must return (label, prob, hits, l0) or "
+                "classify_fn must return (label, prob, hits, l0[, detailed_hits]) or "
                 "ClassifierOutput, got {!r}".format(type(tup).__name__)
             )
-        label, prob, hits, l0 = tup
+        label, prob, hits, l0 = tup[:4]
         return cls(
             label=label,
             confidence=prob,
