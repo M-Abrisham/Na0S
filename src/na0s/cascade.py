@@ -80,7 +80,7 @@ class WhitelistFilter:
     1. Starts with a question word or ends with '?'
     2. Contains no instruction boundary markers
     3. Contains no obfuscation (base64/hex/URL-encoding heuristics)
-    4. Under 500 characters
+    4. Under 1000 characters
     5. Three or fewer sentences (single intent)
     6. No role-assignment phrases
     """
@@ -126,7 +126,7 @@ class WhitelistFilter:
         re.IGNORECASE,
     )
 
-    MAX_LENGTH = 500
+    MAX_LENGTH = 1000  # BUG-L6-6 fix: 500 was too restrictive
     MAX_SENTENCES = 3
 
     @staticmethod
@@ -277,14 +277,22 @@ class WeightedClassifier:
 
         # --- Override protection ---
         # If ML is highly confident it is safe AND only medium-severity
-        # rules triggered, trust the ML model.
+        # rules triggered AND the composite score is below the threshold,
+        # trust the ML model.  BUG-L6-2 fix: only override when composite
+        # < threshold; otherwise a valid MALICIOUS decision is suppressed.
         ml_safe_confidence = 1.0 - ml_prob
         if (ml_safe_confidence > 0.8
                 and max_severity == "medium"
-                and obf_weight == 0.0):
+                and obf_weight == 0.0
+                and final_score < self.threshold):
             return "SAFE", round(1.0 - final_score, 4), hit_names
 
         # --- Threshold decision ---
+        # BUG-L6-4 note: confidence semantics are P(label correct):
+        #   MALICIOUS -> confidence = final_score (composite malicious probability)
+        #   SAFE      -> confidence = 1.0 - final_score (probability it's truly safe)
+        # This is intentional: callers always get "how confident are we in
+        # this label?" regardless of which label was chosen.
         if final_score >= self.threshold:
             return "MALICIOUS", round(final_score, 4), hit_names
         else:
@@ -561,28 +569,42 @@ class CascadeClassifier:
                     # verdict with .error / .verdict / .confidence attrs.
                     # Handle both interfaces.
                     if _HAS_LLM_CHECKER and isinstance(judge, LLMChecker):
-                        result = judge.classify_prompt(text)
+                        result = judge.classify_prompt(clean)
                         self._judged += 1
                         if result.label in ("SAFE", "MALICIOUS"):
                             original_label = label
+                            # BUG-L6-5 fix: align metrics before blending.
+                            # Convert both signals to P(malicious) axis:
+                            # - Stage 2: confidence is P(label correct), so
+                            #   P(mal) = confidence if MALICIOUS, else 1-confidence
+                            # - Judge: result.confidence is P(verdict correct), so
+                            #   P(mal) = result.confidence if MALICIOUS, else 1-result.confidence
+                            stage2_p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                            judge_p_mal = result.confidence if result.label == "MALICIOUS" else 1.0 - result.confidence
+                            blended_p_mal = 0.3 * stage2_p_mal + 0.7 * judge_p_mal
                             label = result.label
+                            # Convert back to P(label correct) semantics
                             confidence = round(
-                                0.3 * confidence + 0.7 * result.confidence, 4
+                                blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
                             return label, confidence, hits, "judge"
                     else:
                         # Original LLMJudge interface
-                        verdict = judge.classify(text)
+                        verdict = judge.classify(clean)
                         self._judged += 1
                         if (hasattr(verdict, "error") and verdict.error is None
                                 and hasattr(verdict, "verdict")
                                 and verdict.verdict != "UNKNOWN"):
                             original_label = label
+                            # BUG-L6-5 fix: align metrics before blending.
+                            stage2_p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                            judge_p_mal = verdict.confidence if verdict.verdict == "MALICIOUS" else 1.0 - verdict.confidence
+                            blended_p_mal = 0.3 * stage2_p_mal + 0.7 * judge_p_mal
                             label = verdict.verdict
                             confidence = round(
-                                0.3 * confidence + 0.7 * verdict.confidence, 4
+                                blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
