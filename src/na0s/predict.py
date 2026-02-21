@@ -59,8 +59,11 @@
 # done behind a feature flag or with A/B score comparison first.
 # ---------------------------------------------------------------------------
 
+import logging
 import sqlite3
 import threading
+
+logger = logging.getLogger(__name__)
 
 from .layer0 import layer0_sanitize, register_malicious
 from .layer0.timeout import (
@@ -69,7 +72,7 @@ from .layer0.timeout import (
     with_timeout,
 )
 from .obfuscation import obfuscation_scan
-from .rules import rule_score, rule_score_detailed, RULES, SEVERITY_WEIGHTS
+from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load
 from .models import get_model_path
@@ -318,8 +321,14 @@ def classify_prompt(text, vectorizer, model):
 
     # Obfuscation scan — detect encoded payloads and classify decoded views
     obs = obfuscation_scan(clean)
-    if obs["evasion_flags"]:
-        hits.extend(obs["evasion_flags"])
+    obs_flags = obs["evasion_flags"] if obs["evasion_flags"] else []
+
+    # BUG-L2-03 FIX (2026-02-20): Do NOT extend `hits` with obs_flags
+    # before calling _weighted_decision.  Previously, obs flags were added
+    # to `hits` here AND passed separately as `obs_flags`, causing them to
+    # be double-counted: once in the rule-severity loop (rule_weight) and
+    # again in the obfuscation signal (obf_weight).  Now we only add obs
+    # flags to `hits` AFTER _weighted_decision computes the composite score.
 
     # Classify each decoded view — a base64-encoded attack should still be caught
     decoded_malicious = False
@@ -328,11 +337,6 @@ def classify_prompt(text, vectorizer, model):
         if model.predict(X)[0] == 1:
             decoded_malicious = True
             break
-
-    # Separate obfuscation flags from rule-engine hits for weighted voting.
-    # obs["evasion_flags"] were already appended to hits above; extract them
-    # so _weighted_decision can weight obfuscation independently.
-    obs_flags = obs["evasion_flags"] if obs["evasion_flags"] else []
 
     # If a decoded view was classified as malicious, treat it as a strong
     # signal by adding a synthetic critical-severity "hit".
@@ -346,13 +350,18 @@ def classify_prompt(text, vectorizer, model):
                                           hits=hits, obs_flags=obs_flags,
                                           structural=structural)
 
+    # Now add obfuscation flags to hits for downstream consumers
+    # (technique_tags mapping, ScanResult.rule_hits, etc.)
+    if obs_flags:
+        hits.extend(obs_flags)
+
     # Auto-register to FingerprintStore when composite exceeds threshold
     # Use sanitized text so fingerprint lookups match post-normalization input
     if "MALICIOUS" in label and hits:
         try:
             register_malicious(l0.sanitized_text)
-        except (sqlite3.Error, OSError):
-            pass  # non-critical — don't break classification
+        except (sqlite3.Error, OSError) as e:
+            logger.warning("FingerprintStore registration failed: %s", e)
 
     return label, composite, hits, l0, detailed_hits
 

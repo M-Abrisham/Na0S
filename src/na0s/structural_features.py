@@ -10,6 +10,7 @@ about "ignore instructions" from an actual injection attack.
 import re
 import math
 from collections import Counter
+from dataclasses import dataclass, fields, asdict
 
 import numpy as np
 
@@ -48,7 +49,7 @@ _NEGATION_COMMAND = re.compile(
 
 _URL_PATTERN = re.compile(r"https?://")
 
-_EMAIL_PATTERN = re.compile(r"\w+@\w+")
+_EMAIL_PATTERN = re.compile(r"\w+@\w+\.\w+")
 
 _CONSECUTIVE_PUNCT = re.compile(r"[^\w\s]{2,}")
 
@@ -56,8 +57,64 @@ _FIRST_PERSON = re.compile(r"\b(?:I|my|me|we|our)\b", re.IGNORECASE)
 
 _SECOND_PERSON = re.compile(r"\b(?:you|your)\b", re.IGNORECASE)
 
-# Sentence splitter: split on . ! ? (possibly followed by quotes/parens)
-_SENTENCE_SPLIT = re.compile(r'(?<=[.!?])["\')]*\s+')
+# Common abbreviations that should NOT trigger sentence splits.
+_ABBREVIATIONS = frozenset({
+    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "ave", "blvd",
+    "vs", "etc", "inc", "ltd", "corp", "dept", "univ", "assn",
+    "gen", "gov", "sgt", "cpl", "pvt", "capt", "col", "lt", "cmdr",
+    "adm", "maj", "rev", "hon",
+    # Latin abbreviations
+    "e.g", "i.e", "cf", "al", "approx", "dept",
+})
+
+def _split_sentences(text):
+    """Split text into sentences.  Returns a list of non-empty strings.
+
+    Uses a heuristic that avoids splitting on common abbreviations
+    (e.g. "Dr.", "Mr.", "e.g.", "U.S.A.") while correctly splitting
+    on sentence-ending periods.
+    """
+    if not text or not text.strip():
+        return []
+
+    # Strategy: first split on unambiguous terminators (! ?), then
+    # handle period-based splits with abbreviation awareness.
+    #
+    # We use a single-pass approach: find all ". " positions and
+    # decide whether each is a sentence boundary or abbreviation.
+    # Find candidate split points: period followed by optional closing
+    # quotes/parens, then whitespace
+    result_parts = []
+    last = 0
+
+    for m in re.finditer(r'([.!?])["\')]*\s+', text):
+        punct = m.group(1)
+        split_pos = m.end()
+
+        if punct == '.':
+            # Check if the word before the period is an abbreviation
+            # or a single uppercase letter (initial)
+            before = text[last:m.start()].rstrip()
+            # Extract the last "word" before the period
+            last_word_match = re.search(r'(\S+)$', before)
+            if last_word_match:
+                last_word = last_word_match.group(1).lower().rstrip('.')
+                # Skip if it's a known abbreviation
+                if last_word in _ABBREVIATIONS:
+                    continue
+                # Skip if it's a single letter (initial like "U." in U.S.A.)
+                if len(last_word) == 1 and last_word.isalpha():
+                    continue
+
+        # This is a real sentence boundary
+        result_parts.append(text[last:m.start() + 1])  # include the punct
+        last = split_pos
+
+    # Add the remaining text
+    if last < len(text):
+        result_parts.append(text[last:])
+
+    return [s.strip() for s in result_parts if s.strip()]
 
 # ---------------------------------------------------------------------------
 # Feature name list (module-level, in order)
@@ -98,22 +155,123 @@ FEATURE_NAMES = [
 
 
 # ---------------------------------------------------------------------------
+# Dataclass for structured results
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StructuralFeatures:
+    """Typed container for structural feature extraction results.
+
+    Supports dict-like access for backward compatibility with code that
+    uses ``structural.get("key", default)``, ``structural["key"]``,
+    or ``"key" in structural``.
+    """
+
+    # Length features (3)
+    char_count: int = 0
+    word_count: int = 0
+    avg_word_length: float = 0.0
+    # Casing features (3)
+    uppercase_ratio: float = 0.0
+    title_case_words: int = 0
+    all_caps_words: int = 0
+    # Punctuation features (4)
+    exclamation_count: int = 0
+    question_count: int = 0
+    special_char_ratio: float = 0.0
+    consecutive_punctuation: int = 0
+    # Structural markers (5)
+    line_count: int = 0
+    has_code_block: int = 0
+    has_url: int = 0
+    has_email: int = 0
+    newline_ratio: float = 0.0
+    # Injection signal features (6)
+    imperative_start: int = 0
+    role_assignment: int = 0
+    instruction_boundary: int = 0
+    negation_command: int = 0
+    quote_depth: int = 0
+    text_entropy: float = 0.0
+    # Context features (3)
+    question_sentence_ratio: float = 0.0
+    first_person_ratio: float = 0.0
+    second_person_ratio: float = 0.0
+
+    # ---- dict-like interface for backward compatibility ----
+
+    def __getitem__(self, key):
+        """Allow ``structural["key"]`` access."""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key):
+        """Allow ``"key" in structural``."""
+        return hasattr(self, key) and key in self.keys()
+
+    def get(self, key, default=None):
+        """Allow ``structural.get("key", default)``."""
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            return default
+
+    def keys(self):
+        """Return feature names (matches FEATURE_NAMES order)."""
+        return [f.name for f in fields(self)]
+
+    def values(self):
+        """Return feature values in FEATURE_NAMES order."""
+        return [getattr(self, f.name) for f in fields(self)]
+
+    def items(self):
+        """Return (name, value) pairs in FEATURE_NAMES order."""
+        return [(f.name, getattr(self, f.name)) for f in fields(self)]
+
+    def to_dict(self):
+        """Convert to a plain dict."""
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
 
 def _compute_quote_depth(text):
-    """Return the maximum nesting depth of quotes (single, double, backtick)."""
-    openers = {'"': '"', "'": "'", '`': '`'}
+    """Return the maximum nesting depth of quotes (single, double, backtick).
+
+    Handles apostrophes correctly: a single quote preceded by a word
+    character (e.g. "it's", "don't") is treated as an apostrophe,
+    NOT a quote delimiter.
+    """
     max_depth = 0
     stack = []
-    for ch in text:
-        if ch in openers:
-            if stack and stack[-1] == ch:
-                stack.pop()          # closing quote
-            else:
-                stack.append(ch)     # opening quote
-                if len(stack) > max_depth:
-                    max_depth = len(stack)
+    for i, ch in enumerate(text):
+        if ch not in ('"', "'", '`'):
+            continue
+        # Apostrophe heuristic: single quote preceded by a word char
+        # (letter/digit) is an apostrophe, not a quote delimiter,
+        # UNLESS it matches the innermost open quote (closing it).
+        if ch == "'" and i > 0 and text[i - 1].isalnum():
+            # It's an apostrophe -- skip it, unless it's closing
+            # a previously opened single-quote on the stack.
+            if stack and stack[-1] == "'":
+                # Check if it looks like a closing quote: the char
+                # after it must be non-alphanumeric or end-of-string.
+                next_idx = i + 1
+                if next_idx >= len(text) or not text[next_idx].isalnum():
+                    stack.pop()  # closing single-quote
+                # else: apostrophe in the middle of a word, skip
+            continue
+        # Normal quote character
+        if stack and stack[-1] == ch:
+            stack.pop()          # closing quote
+        else:
+            stack.append(ch)     # opening quote
+            if len(stack) > max_depth:
+                max_depth = len(stack)
     return max_depth
 
 
@@ -131,10 +289,6 @@ def _compute_entropy(text):
     return entropy
 
 
-def _split_sentences(text):
-    """Split text into sentences. Returns a list of non-empty strings."""
-    parts = _SENTENCE_SPLIT.split(text)
-    return [s.strip() for s in parts if s.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -151,9 +305,10 @@ def extract_structural_features(text):
 
     Returns
     -------
-    dict[str, int | float]
-        A mapping from feature name to its numerical value.  Keys match
-        :data:`FEATURE_NAMES` exactly.
+    StructuralFeatures
+        A dataclass with typed fields matching :data:`FEATURE_NAMES`.
+        Supports dict-like access (``result["key"]``, ``result.get()``,
+        ``"key" in result``) for backward compatibility.
     """
     if text is None:
         text = ""
@@ -249,45 +404,107 @@ def extract_structural_features(text):
     # ------------------------------------------------------------------
     # Assemble result
     # ------------------------------------------------------------------
-    return {
-        "char_count": char_count,
-        "word_count": word_count,
-        "avg_word_length": avg_word_length,
-        "uppercase_ratio": uppercase_ratio,
-        "title_case_words": title_case_words,
-        "all_caps_words": all_caps_words,
-        "exclamation_count": exclamation_count,
-        "question_count": question_count,
-        "special_char_ratio": special_char_ratio,
-        "consecutive_punctuation": consecutive_punctuation,
-        "line_count": line_count,
-        "has_code_block": has_code_block,
-        "has_url": has_url,
-        "has_email": has_email,
-        "newline_ratio": newline_ratio,
-        "imperative_start": imperative_start,
-        "role_assignment": role_assignment,
-        "instruction_boundary": instruction_boundary,
-        "negation_command": negation_command,
-        "quote_depth": quote_depth,
-        "text_entropy": text_entropy,
-        "question_sentence_ratio": question_sentence_ratio,
-        "first_person_ratio": first_person_ratio,
-        "second_person_ratio": second_person_ratio,
-    }
+    return StructuralFeatures(
+        char_count=char_count,
+        word_count=word_count,
+        avg_word_length=avg_word_length,
+        uppercase_ratio=uppercase_ratio,
+        title_case_words=title_case_words,
+        all_caps_words=all_caps_words,
+        exclamation_count=exclamation_count,
+        question_count=question_count,
+        special_char_ratio=special_char_ratio,
+        consecutive_punctuation=consecutive_punctuation,
+        line_count=line_count,
+        has_code_block=has_code_block,
+        has_url=has_url,
+        has_email=has_email,
+        newline_ratio=newline_ratio,
+        imperative_start=imperative_start,
+        role_assignment=role_assignment,
+        instruction_boundary=instruction_boundary,
+        negation_command=negation_command,
+        quote_depth=quote_depth,
+        text_entropy=text_entropy,
+        question_sentence_ratio=question_sentence_ratio,
+        first_person_ratio=first_person_ratio,
+        second_person_ratio=second_person_ratio,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Normalization
+# ---------------------------------------------------------------------------
+
+# Features that are unbounded (not naturally in [0, 1]) and benefit from
+# normalization when used with ML classifiers expecting scaled inputs.
+# The caps are *soft* maximums chosen from empirical analysis of prompt
+# injection datasets; values above the cap are clipped to 1.0.
+UNBOUNDED_FEATURE_CAPS = {
+    "char_count": 5000.0,
+    "word_count": 1000.0,
+    "avg_word_length": 20.0,
+    "exclamation_count": 20.0,
+    "question_count": 20.0,
+    "consecutive_punctuation": 20.0,
+    "line_count": 100.0,
+    "title_case_words": 50.0,
+    "all_caps_words": 50.0,
+    "newline_ratio": 5.0,
+    "quote_depth": 10.0,
+    "text_entropy": 8.0,    # Shannon entropy of ASCII text maxes at ~6.6
+}
+
+
+def normalize_features(feature_array):
+    """Min-max normalize unbounded features to [0, 1] using soft caps.
+
+    Features that are already ratios or binary flags (0/1) are left
+    unchanged.  Unbounded features (``char_count``, ``word_count``,
+    ``quote_depth``, ``text_entropy``, etc.) are divided by a soft
+    maximum and clipped to [0, 1].
+
+    Parameters
+    ----------
+    feature_array : numpy.ndarray
+        Array of shape ``(n, len(FEATURE_NAMES))`` from
+        :func:`extract_structural_features_batch`.
+
+    Returns
+    -------
+    numpy.ndarray
+        Normalized copy of the input array (same shape, float64).
+
+    Notes
+    -----
+    This is intentionally a *separate* function rather than being built
+    into ``extract_structural_features()`` because ``predict.py`` relies
+    on raw, un-normalized feature values for threshold-based decisions
+    (e.g. ``quote_depth >= 3``, ``text_entropy > 5.0``).
+    """
+    out = feature_array.copy()
+    for feat_name, cap in UNBOUNDED_FEATURE_CAPS.items():
+        idx = FEATURE_NAMES.index(feat_name)
+        out[:, idx] = np.clip(out[:, idx] / cap, 0.0, 1.0)
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Batch extraction
 # ---------------------------------------------------------------------------
 
-def extract_structural_features_batch(texts):
+def extract_structural_features_batch(texts, normalize=False):
     """Extract structural features for a list of texts.
 
     Parameters
     ----------
     texts : list[str]
         Input prompts.  ``None`` entries are treated as empty strings.
+    normalize : bool, optional
+        If ``True``, unbounded features are scaled to [0, 1] using soft
+        caps (see :func:`normalize_features`).  Default is ``False`` to
+        preserve backward compatibility with ``predict.py``'s raw-value
+        thresholds.
 
     Returns
     -------
@@ -298,7 +515,10 @@ def extract_structural_features_batch(texts):
     for text in texts:
         feat = extract_structural_features(text)
         rows.append([feat[name] for name in FEATURE_NAMES])
-    return np.array(rows, dtype=np.float64)
+    arr = np.array(rows, dtype=np.float64)
+    if normalize:
+        arr = normalize_features(arr)
+    return arr
 
 
 # ---------------------------------------------------------------------------
