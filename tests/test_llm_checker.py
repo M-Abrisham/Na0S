@@ -237,68 +237,69 @@ class TestParseResponseValidJSON(unittest.TestCase):
 # ============================================================================
 
 class TestParseResponseFallback(unittest.TestCase):
-    """Test _parse_response keyword-based fallback when no JSON is found."""
+    """Test _parse_response returns UNKNOWN when no valid JSON is found.
+
+    After the Gap 2 security fix, _parse_response no longer guesses from
+    keywords -- it returns UNKNOWN for any non-JSON response.
+    """
 
     def test_no_json_with_malicious_keyword(self):
-        """Content with 'malicious' keyword but no JSON -> MALICIOUS label."""
+        """Content with 'malicious' keyword but no JSON -> UNKNOWN label."""
         content = "This prompt is clearly malicious and should be blocked."
         result = _parse_response(content)
-        self.assertEqual(result.label, "MALICIOUS")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
-        self.assertEqual(result.rationale, content.strip())
 
     def test_no_json_without_malicious_keyword(self):
-        """Content without 'malicious' keyword and no JSON -> SAFE label."""
+        """Content without 'malicious' keyword and no JSON -> UNKNOWN label."""
         content = "This prompt appears to be a normal question."
         result = _parse_response(content)
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
-        self.assertEqual(result.rationale, content.strip())
 
     def test_malicious_keyword_case_insensitive(self):
-        """Keyword 'MALICIOUS' in any case triggers MALICIOUS label."""
+        """Keyword 'MALICIOUS' in any case -> UNKNOWN (no keyword guessing)."""
         content = "The text is MALICIOUS in nature."
         result = _parse_response(content)
-        self.assertEqual(result.label, "MALICIOUS")
+        self.assertEqual(result.label, "UNKNOWN")
 
     def test_malicious_keyword_mixed_case(self):
-        """Mixed-case 'Malicious' is also detected."""
+        """Mixed-case 'Malicious' -> UNKNOWN (no keyword guessing)."""
         content = "Malicious intent detected in this prompt."
         result = _parse_response(content)
-        self.assertEqual(result.label, "MALICIOUS")
+        self.assertEqual(result.label, "UNKNOWN")
 
     def test_empty_string(self):
-        """Empty string input returns SAFE with zero confidence."""
+        """Empty string input returns UNKNOWN with zero confidence."""
         result = _parse_response("")
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
-        self.assertEqual(result.rationale, "")
 
     def test_whitespace_only(self):
-        """Whitespace-only input returns SAFE with stripped rationale."""
+        """Whitespace-only input returns UNKNOWN."""
         result = _parse_response("   \n\t  ")
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
     def test_only_opening_brace(self):
-        """Content with '{' but no '}' triggers fallback."""
+        """Content with '{' but no '}' triggers fallback -> UNKNOWN."""
         content = "Something { but never closed"
         result = _parse_response(content)
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
     def test_only_closing_brace(self):
-        """Content with '}' but no '{' triggers fallback."""
+        """Content with '}' but no '{' triggers fallback -> UNKNOWN."""
         content = "Something } but never opened"
         result = _parse_response(content)
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
     def test_closing_before_opening(self):
-        """'} ... {' (reversed order) triggers fallback because end <= start."""
+        """'} ... {' (reversed order) triggers fallback -> UNKNOWN."""
         content = "} something {"
         result = _parse_response(content)
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
 
@@ -310,18 +311,17 @@ class TestParseResponseEdgeCases(unittest.TestCase):
     """Test _parse_response with tricky/malformed inputs."""
 
     def test_invalid_json_with_braces(self):
-        """Braces with non-JSON content triggers JSON decode fallback."""
+        """Braces with non-JSON content triggers JSON decode fallback -> UNKNOWN."""
         content = "{ not valid json at all }"
         result = _parse_response(content)
-        # Falls back to keyword detection
         self.assertEqual(result.confidence, 0.0)
-        self.assertIn(result.label, ("SAFE", "MALICIOUS"))
+        self.assertEqual(result.label, "UNKNOWN")
 
     def test_invalid_json_with_malicious_keyword(self):
-        """Invalid JSON containing 'malicious' keyword -> MALICIOUS via fallback."""
+        """Invalid JSON containing 'malicious' keyword -> UNKNOWN (no guessing)."""
         content = "{ this is malicious content }"
         result = _parse_response(content)
-        self.assertEqual(result.label, "MALICIOUS")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
     def test_missing_label_field(self):
@@ -552,7 +552,7 @@ class TestClassifyPrompt(unittest.TestCase):
         self.assertEqual(temperature, 0)
 
     def test_classify_empty_content_from_api(self):
-        """API returning None content is handled (empty string fallback)."""
+        """API returning None content is handled (empty string -> UNKNOWN)."""
         message = MagicMock()
         message.content = None
         choice = MagicMock()
@@ -561,8 +561,8 @@ class TestClassifyPrompt(unittest.TestCase):
         response.choices = [choice]
         self.mock_client.chat.completions.create.return_value = response
         result = self.checker.classify_prompt("test")
-        # content = "" -> no JSON -> keyword fallback -> SAFE
-        self.assertEqual(result.label, "SAFE")
+        # content = "" -> no JSON -> UNKNOWN (no keyword guessing)
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
     def test_classify_returns_llm_check_result(self):
@@ -572,17 +572,17 @@ class TestClassifyPrompt(unittest.TestCase):
         self.assertIsInstance(result, LLMCheckResult)
 
     def test_classify_non_json_response(self):
-        """API returning plain text triggers keyword fallback."""
+        """API returning plain text -> UNKNOWN (no keyword guessing)."""
         self._set_response("This prompt looks safe to me.")
         result = self.checker.classify_prompt("test")
-        self.assertEqual(result.label, "SAFE")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
     def test_classify_non_json_malicious_response(self):
-        """API returning plain text with 'malicious' triggers MALICIOUS fallback."""
+        """API returning plain text with 'malicious' -> UNKNOWN (no keyword guessing)."""
         self._set_response("I believe this is a malicious prompt injection attempt.")
         result = self.checker.classify_prompt("test")
-        self.assertEqual(result.label, "MALICIOUS")
+        self.assertEqual(result.label, "UNKNOWN")
         self.assertEqual(result.confidence, 0.0)
 
 

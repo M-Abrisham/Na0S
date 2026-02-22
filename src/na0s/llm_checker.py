@@ -59,9 +59,12 @@ def _parse_response(content: str) -> LLMCheckResult:
     end_index = content.rfind("}")
 
     if start_index == -1 or end_index == -1 or end_index <= start_index:
-        # No JSON found — fall back to keyword detection
-        label = "MALICIOUS" if "malicious" in content.lower() else "SAFE"
-        return LLMCheckResult(label=label, confidence=0.0, rationale=content.strip())
+        # No JSON found — return UNKNOWN instead of guessing from keywords
+        return LLMCheckResult(
+            label="UNKNOWN",
+            confidence=0.0,
+            rationale="Non-JSON response from checker",
+        )
 
     json_str = content[start_index : end_index + 1]
     try:
@@ -71,8 +74,11 @@ def _parse_response(content: str) -> LLMCheckResult:
         rationale = str(data.get("rationale", "")).strip()
         return LLMCheckResult(label=label, confidence=confidence, rationale=rationale)
     except (json.JSONDecodeError, ValueError):
-        label = "MALICIOUS" if "malicious" in content.lower() else "SAFE"
-        return LLMCheckResult(label=label, confidence=0.0, rationale=content.strip())
+        return LLMCheckResult(
+            label="UNKNOWN",
+            confidence=0.0,
+            rationale="JSON parse error",
+        )
 
 
 def main() -> None:

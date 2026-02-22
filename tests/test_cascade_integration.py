@@ -161,21 +161,22 @@ class TestWhitelistFilter(unittest.TestCase):
         self.assertIn("role-assignment", reason)
 
     def test_long_input_not_whitelisted(self):
-        """Input exceeding 500 characters should fail whitelist.
+        """Input exceeding MAX_LENGTH (1000) characters should fail whitelist.
 
         NOTE: The base64 heuristic (criterion 3) fires before the length
         check (criterion 4) for repeated ASCII letters, so the reason may
-        be 'possible base64 obfuscation' instead of '500 characters'.
+        be 'possible base64 obfuscation' instead of '1000 characters'.
         Both are valid rejections.
         """
         # Use spaces to avoid triggering base64/hex heuristics
-        text = "What is " + "the meaning of life " * 30 + "?"
-        self.assertGreater(len(text), 500)
+        # BUG-L6-6: MAX_LENGTH raised from 500 to 1000, so we need > 1000 chars
+        text = "What is " + "the meaning of life " * 55 + "?"
+        self.assertGreater(len(text), 1000)
         is_safe, reason = self.wf.is_whitelisted(text)
         self.assertFalse(is_safe, "Long input should fail whitelist")
         # May fail on length, sentence count, or base64 depending on content
         self.assertTrue(
-            "500 characters" in reason or "too many sentences" in reason,
+            "1000 characters" in reason or "too many sentences" in reason,
             "Expected length or sentence limit failure, got: {}".format(reason)
         )
 

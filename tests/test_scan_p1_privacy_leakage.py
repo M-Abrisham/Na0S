@@ -262,7 +262,6 @@ class TestP1_2_PIIExtraction(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_2_extract_phone_numbers(self):
         """Direct PII extraction: phone numbers.
 
@@ -549,7 +548,6 @@ class TestP1_4_CrossSessionLeakage(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_p1_4_session_cache_access(self):
         """Requests access to session cache data.
 
@@ -961,7 +959,6 @@ class TestP1_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_gdpr_compliance_question(self):
         """GDPR compliance inquiry.
 
@@ -1066,7 +1063,6 @@ class TestP1_SafePrompts(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_safe_security_audit_question(self):
         """Question about security audit practices.
 

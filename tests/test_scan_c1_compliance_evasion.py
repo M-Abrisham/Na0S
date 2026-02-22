@@ -453,7 +453,6 @@ class TestC1_3_AcademicFraming(unittest.TestCase):
     "peer review") evade detection.
     """
 
-    @unittest.expectedFailure
     def test_thesis_research_framing(self):
         """Harmful request framed as thesis research, detected via ML.
 
@@ -474,7 +473,6 @@ class TestC1_3_AcademicFraming(unittest.TestCase):
             "overlap (radicalization, extremist, recruit). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_literature_review_framing(self):
         """Literature review framing, detected via security vocabulary.
 
@@ -558,7 +556,6 @@ class TestC1_3_AcademicFraming(unittest.TestCase):
             "Expected: peer review framing evades detection. " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_safety_audit_pretext(self):
         """Safety audit pretext, detected via security vocabulary.
 
@@ -579,7 +576,6 @@ class TestC1_3_AcademicFraming(unittest.TestCase):
             "(vulnerabilities, bypass, penetration tester). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_textbook_exercise_framing(self):
         """Textbook exercise framing, detected via social engineering vocab.
 
@@ -800,7 +796,6 @@ class TestC1_5_AuthorityImpersonation(unittest.TestCase):
             "(synthesis, chemical, procedure). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_lawyer_claim_exploit(self):
         """Lawyer authority claim, detected via exploit vocabulary.
 
@@ -840,7 +835,6 @@ class TestC1_5_AuthorityImpersonation(unittest.TestCase):
             "(packet capture, decrypt, HTTPS). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_security_researcher_claim(self):
         """Security researcher claim, detected via phishing vocabulary.
 
@@ -942,7 +936,6 @@ class TestC1_Combined(unittest.TestCase):
             "via ML vocabulary (override, system prompt, bypass). " + _fmt(result)
         )
 
-    @unittest.expectedFailure
     def test_emotional_plus_academic(self):
         """Emotional + academic framing, detected via synthesis vocabulary.
 

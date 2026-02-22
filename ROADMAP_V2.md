@@ -216,11 +216,11 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 ## Layer 2: Obfuscation Detection & Decoding
 
 **Files**: `src/obfuscation.py`
-**Tests**: `tests/test_obfuscation.py` (3 tests)
-**Status**: Partially implemented — detects 3 of 11 encoding types
+**Tests**: `tests/test_obfuscation.py` (3 tests), `tests/test_l2_obfuscation_fixes.py` (34 tests), `tests/test_scan_d4_encoding_obfuscation.py` (51 tests)
+**Status**: Partially implemented — detects 6 of 11 encoding types (base64, hex, URL, ROT13, leetspeak, reversed text)
 
 ### Updated Description
-Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Currently handles Base64, hex, and URL-encoding with entropy analysis, punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through the ML model. **Missing 8 encoding types**: ROT13, leetspeak, reversed text, Morse, binary, octal, pig-latin, and nested multi-layer encoding.
+Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Handles Base64, hex, URL-encoding, ROT13, leetspeak, and reversed text with entropy analysis, punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. **Missing 5 encoding types**: Caesar cipher (non-13 shifts), Morse, binary, octal, pig-latin.
 
 ### TODO List
 
@@ -242,9 +242,9 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 - [ ] **FIX: Combined signal boosting missing** — Persona hijack + encoded payload in same message should carry extra weight. Currently scored independently. **Priority**: P1.
 
 #### NEW (Discovered by research)
-- [ ] **ROT13/Caesar detection** — Chi-squared frequency analysis: ROT13 shifts English letter frequencies. Decode candidate, check if dictionary word coverage improves. Maps to D4.4. **Effort**: Easy.
-- [ ] **Leetspeak normalizer** — Substitution map (`1→i`, `3→e`, `4→a`, `0→o`, `@→a`), density check, dictionary validation. Maps to D4.5. **Effort**: Easy-Medium. FP risk: Medium-High.
-- [ ] **Reversed text detection** — Reverse candidate, check dictionary word ratio improvement. Maps to D4.6. **Effort**: Easy. FP risk: Low.
+- [x] **ROT13/Caesar detection** — ROT13 decoder: applies `codecs.decode(text, 'rot_13')`, validates via attack-keyword matching (2+ unique hits). Explicit "ROT13:" label detection. Decoded views fed through ML + L1 rules. Caesar non-13 shifts remain a gap. Maps to D4.4. ✅ DONE (2026-02-21)
+- [x] **Leetspeak normalizer** — Substitution map (`0→o`, `1→i`, `3→e`, `4→a`, `5→s`, `7→t`, `@→a`, `$→s`, `!→i`), density threshold (>=10%), attack-keyword validation. Decoded views fed through ML + L1 rules. Maps to D4.5. ✅ DONE (2026-02-21)
+- [x] **Reversed text detection** — Full-string and per-word reversal with attack-keyword validation. Both variants added as decoded views for L1 rule matching. Maps to D4.6. ✅ DONE (2026-02-21)
 - [ ] **Morse code detection** — Regex for dot-dash patterns (≥80% density), decode, validate. **Effort**: Easy.
 - [ ] **Binary/Octal/Decimal ASCII detection** — Regex for bit/digit patterns, decode, validate printable ASCII. **Effort**: Easy.
 - [ ] **Recursive Matryoshka unwrapper** — Recursive `obfuscation_scan_recursive()` with: max_depth=3-5, max_expansion=10x, cycle detection, encoding chain tracking. **Effort**: Medium.
@@ -254,9 +254,9 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 - [ ] **Syllable-splitting detection** — De-hyphenation + suspicious word check (`ig-nore` → `ignore`). **Effort**: Easy.
 
 #### REMAINING (From original roadmap)
-- [ ] ROT13 ← covered in NEW above
-- [ ] Leetspeak ← covered in NEW above
-- [ ] Reversed text ← covered in NEW above
+- [x] ROT13 ← DONE (2026-02-21)
+- [x] Leetspeak ← DONE (2026-02-21)
+- [x] Reversed text ← DONE (2026-02-21)
 - [ ] Binary encoding ← covered in NEW above
 - [ ] Morse code ← covered in NEW above
 - [ ] Whitespace injection ← partially in L0, stego variant in NEW
@@ -275,8 +275,8 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 - No test for: entropy detection, hex decoding, casing transitions, recursive decoding, edge cases (empty input, very large input), false positive scenarios
 
 ### Implementation Plan
-**Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors
-**Phase 2 (P1)**: Add leetspeak, Morse, binary/octal, syllable-splitting, combined signal boosting
+**Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors ✅ DONE (2026-02-20/21)
+**Phase 2 (P1)**: ~~Add leetspeak~~, Morse, binary/octal, syllable-splitting, combined signal boosting (leetspeak ✅ DONE 2026-02-21)
 **Phase 3 (P2)**: Unicode tag stego, whitespace stego, ASCII art detection
 
 ---
@@ -615,8 +615,8 @@ CascadeClassifier.classify(text)
 ## Layer 7: LLM Judge
 
 **Files**: `src/llm_judge.py` (386 lines), `src/llm_checker.py` (87 lines, deprecated)
-**Tests**: `tests/test_llm_judge_hardening.py` (17 tests), `tests/test_llm_checker.py` (73 tests)
-**Status**: Implemented — integrated into cascade.py Stage 3. Anti-meta-injection hardening applied (2026-02-20): INPUT delimiters, nonce verification, input truncation at 4000 chars. 90 tests passing.
+**Tests**: `tests/test_llm_judge_hardening.py` (67 tests), `tests/test_llm_checker.py` (73 tests)
+**Status**: Implemented — integrated into cascade.py Stage 3. Anti-meta-injection hardening applied (2026-02-20): INPUT delimiters, nonce verification, input truncation at 4000 chars. Additional hardening (2026-02-21): nonce position bias fix, reasoning sanitization, circuit breaker full coverage. 67 hardening tests passing.
 
 ### Updated Description
 Layer 7 provides semantic evaluation of ambiguous prompts using an LLM as a judge. Supports dual backends (OpenAI `gpt-4o-mini` and Groq `llama-3.3-70b-versatile`) with graceful degradation. Uses a 4-pair few-shot prompt designed to minimize FPs on educational/benign inputs containing dangerous-looking keywords. Returns `JudgeVerdict` dataclass (frozen) with verdict, confidence, reasoning, latency, model, and error fields. Includes self-consistency voting (3 calls at temperature 0.5, majority vote) and a circuit breaker wrapper (5 failures → 60s open). The older `llm_checker.py` is a simpler Groq-only prototype without few-shot examples, self-consistency, or circuit breaker — it should be deprecated.
@@ -629,23 +629,31 @@ Layer 7 provides semantic evaluation of ambiguous prompts using an LLM as a judg
 - [x] System prompt with clear injection definition + non-injection examples — `llm_judge.py:52`
 - [x] 4-pair few-shot examples (override attack, educational question, benign code request, DAN jailbreak) — `llm_judge.py:81`
 - [x] JSON-mode response format (OpenAI-specific) — `llm_judge.py:209`
-- [x] Graceful fallback: keyword heuristic if JSON parse fails ("malicious" in content) — `llm_judge.py:305`
+- [x] ~~Graceful fallback: keyword heuristic if JSON parse fails~~ — REPLACED by UNKNOWN verdict on parse failure (Gap 2 fix, 2026-02-21)
 - [x] `classify_with_consistency()` — 3-call majority vote at temperature 0.5 — `llm_judge.py:227`
 - [x] `LLMJudgeWithCircuitBreaker` — 5-failure threshold, 60s reset window — `llm_judge.py:344`
 - [x] Integration with cascade.py Stage 3 — ambiguous-zone routing (0.25-0.85)
 - [x] Evaluation script: `scripts/evaluate_llm_judge.py` (TP/FP/TN/FN, FPR/FNR, latency p50/p95)
 
 #### FIXES
-- [ ] **BUG-L7-1 (MEDIUM)**: JSON parsing fragile — uses `content.find("{")` and `rfind("}")` to extract JSON. Fails on nested JSON or markdown code blocks containing `{}`. **Fix**: Use `json.loads()` with proper extraction regex.
-- [ ] **BUG-L7-2 (MEDIUM)**: Keyword fallback too broad — `"malicious" in content.lower()` catches educational text discussing malicious content. **Fix**: Require keyword in specific JSON-like context or remove fallback.
-- [ ] **BUG-L7-3 (MEDIUM)**: Self-consistency majority vote — if 1 SAFE + 1 MALICIOUS + 1 UNKNOWN, SAFE wins because `safe_count > malicious_count` succeeds (1 > 1 = False, falls to SAFE default). UNKNOWN votes effectively support SAFE. **Fix**: Exclude UNKNOWN from vote count.
-- [ ] **BUG-L7-4 (LOW)**: Confidence in self-consistency — `malicious_count / len(verdicts)` includes UNKNOWNs in denominator, diluting confidence. **Fix**: Divide by non-UNKNOWN count.
-- [ ] **BUG-L7-5 (LOW)**: `verdict.reasoning` discarded by cascade.py — no audit trail of why judge decided. **Fix**: Include reasoning in ScanResult or log it.
+- [x] **BUG-L7-1 (MEDIUM)**: JSON parsing fragile — uses `content.find("{")` and `rfind("}")` to extract JSON. Fails on nested JSON or markdown code blocks containing `{}`. **Fix**: Use `json.loads()` with proper extraction regex. ✅ DONE (2026-02-21) — `_parse_response` now returns UNKNOWN with `error` field on parse failure; `_verify_nonce` uses strict JSON field match instead of substring; reasoning truncated to 500 chars.
+- [x] **BUG-L7-2 (MEDIUM)**: Keyword fallback too broad — `"malicious" in content.lower()` catches educational text discussing malicious content. **Fix**: Require keyword in specific JSON-like context or remove fallback. ✅ DONE (2026-02-21) — Removed keyword fallback entirely from both `llm_judge.py` and `llm_checker.py`; parse failures now return UNKNOWN with `error` field instead of guessing from keywords.
+- [x] **BUG-L7-3 (MEDIUM)**: Self-consistency majority vote — if 1 SAFE + 1 MALICIOUS + 1 UNKNOWN, SAFE wins because `safe_count > malicious_count` succeeds (1 > 1 = False, falls to SAFE default). UNKNOWN votes effectively support SAFE. **Fix**: Exclude UNKNOWN from vote count. DONE (2026-02-21) — UNKNOWN verdicts now filtered from voting; ties default to MALICIOUS (fail-safe); MIN_REQUIRED quorum enforced. 6 tests in TestConsistencyVoting.
+- [x] **BUG-L7-4 (LOW)**: Confidence in self-consistency — `malicious_count / len(verdicts)` includes UNKNOWNs in denominator, diluting confidence. **Fix**: Divide by non-UNKNOWN count. DONE (2026-02-21) — Confidence now combines vote_fraction (pool/valid_count) and avg_model_conf, divided by 2. Tested in test_consistency_confidence_combines_vote_and_model.
+- [ ] **BUG-L7-5 (LOW)**: `verdict.reasoning` discarded by cascade.py — no audit trail of why judge decided. **Fix**: Include reasoning in ScanResult or log it. *Partially addressed (2026-02-21)*: reasoning field now sanitized via `_CONTROL_RE` to strip control characters/ANSI escapes before storage; still needs cascade.py integration to persist reasoning in ScanResult.
 - [x] **BUG-L7-6 (LOW)**: No input truncation — very long inputs could exceed LLM context window. Few-shot + system prompt + long input → token limit. **Fix**: Truncate input to safe length (e.g., 4000 chars). ✅ DONE (2026-02-20) — `JUDGE_INPUT_MAX_CHARS = 4000` in llm_judge.py, `CHECKER_INPUT_MAX_CHARS = 4000` in llm_checker.py.
 - [ ] **FIX-L7-7**: Deprecate `llm_checker.py` — superseded by `llm_judge.py` in every way. **Fix**: Remove file, update any references.
 
 #### NEW (Discovered by research)
 - [x] **Harden against meta-injection** — Wrap user input in explicit `<INPUT>`/`</INPUT>` delimiters, add anti-injection clause to JUDGE_SYSTEM_PROMPT and SYSTEM_PROMPT (llm_checker), nonce-based verification (random hex token judge must echo back), cascade.py passes L0-sanitized `clean` text to judge instead of raw `text`. Source: IM0006 Coverage Gap #6. ✅ DONE (2026-02-20) — 17 tests in test_llm_judge_hardening.py.
+- [x] **Strict nonce field verification** — `_verify_nonce` now parses JSON and checks `data.get("nonce") == expected_nonce` instead of substring match. Prevents hijacked judge from echoing nonce in reasoning text while returning wrong nonce field. No fallback to substring matching. ✅ DONE (2026-02-21) — 6 tests in TestStrictNonceFieldVerification.
+- [x] **API key redaction in error messages** — Added `_safe_error()` sanitizer with `_KEY_RE` regex to redact `sk-`, `gsk_`, and `Bearer` tokens from exception messages before they reach `JudgeVerdict.error`. Prevents API key leakage via `str(exc)` in HTTP client exceptions. ✅ DONE (2026-02-21) — 5 tests in TestAPIKeyRedaction.
+- [x] **Few-shot nonce injection** — `_patch_few_shot_nonce()` helper injects the current request's nonce into assistant-turn JSON in few-shot examples at call time. Teaches the model to always include nonce in responses, reducing nonce verification failures. Original `FEW_SHOT_EXAMPLES` constant is never mutated. ✅ DONE (2026-02-21) — 4 tests in TestFewShotNonceInjection.
+- [x] **Thread-safe circuit breaker** — Added `threading.Lock` to `LLMJudgeWithCircuitBreaker`. All reads/writes to `_consecutive_failures` and `_circuit_open_since` now protected by `_lock`. Circuit check and reset happen under lock; actual API call happens outside lock to avoid blocking. ✅ DONE (2026-02-21) — 4 tests in TestCircuitBreakerThreadSafety.
+- [x] **Fail-safe tie-breaking in consistency voting** — When SAFE and MALICIOUS counts are equal, `classify_with_consistency` now defaults to MALICIOUS (fail-safe) instead of SAFE. Also enforces MIN_REQUIRED quorum: at least `(n//2)+1` calls must succeed. ✅ DONE (2026-02-21) — Tested in test_consistency_tie_defaults_to_malicious.
+- [x] **Nonce position fix (position bias)** — Moved nonce from END to TOP of system prompt in `_build_messages()`. Long system prompts suffer from position bias; instructions at the end receive less model attention. Nonce now prepended as `"NONCE: " + nonce + "\n\n" + JUDGE_SYSTEM_PROMPT` for maximum model attention. ✅ DONE (2026-02-21) — 3 tests in TestNoncePosition.
+- [x] **Reasoning field sanitization** — Added `_CONTROL_RE` module-level regex to strip control characters (null bytes, ANSI escape sequences, DEL) from reasoning field in `_parse_response()`. Preserves benign whitespace (tab, newline, CR) and legitimate Unicode (emoji, CJK). Prevents log injection and terminal escape attacks from hijacked judge responses. ✅ DONE (2026-02-21) — 5 tests in TestReasoningSanitization.
+- [x] **Circuit breaker covers classify_with_consistency** — Added `classify_with_consistency()` method to `LLMJudgeWithCircuitBreaker`. Previously only `classify()` was wrapped; callers using consistency mode bypassed the circuit breaker entirely. New method checks circuit state, delegates to underlying judge, and updates failure count. ✅ DONE (2026-02-21) — 5 tests in TestCircuitBreakerConsistency.
 - [ ] **Response caching** — LRU cache for repeated identical inputs. Saves API cost and reduces latency. **Priority**: P1. **Effort**: Easy (functools.lru_cache or dict).
 - [ ] **Token counting** — Count tokens before API call using tiktoken. Truncate if exceeding model context. **Priority**: P1. **Effort**: Easy.
 - [ ] **Exponential backoff** — Retry transient failures (429, 503) with jitter. **Priority**: P1. **Effort**: Easy.
@@ -1008,7 +1016,7 @@ Layer 12 is the adversarial testing framework. Base classes (`Probe`, `Classifie
 - No tests for buff application correctness
 - No integration tests: probe → evaluate → report pipeline
 - [ ] **Unit tests for `_buffs.py`** — transformation correctness per buff, edge cases (empty string, non-ASCII, emoji), round-trip verification (encode → decode where applicable), multi-buff composition. **Priority**: P1. **Effort**: 3 hours.
-- [ ] **Expand `test_obfuscation.py`** — currently only 3 tests. Add: hex decoding, ROT13 detection, nested multi-layer encoding, entropy detection thresholds, casing transition detection, recursive decoding limits. **Priority**: P1. **Effort**: 4 hours.
+- [x] **Expand `test_obfuscation.py`** — was only 3 tests, now 88 tests across 3 files. Added: hex decoding, ROT13 detection, leetspeak normalization, reversed text detection, nested multi-layer encoding, entropy detection thresholds (composite 2-of-3 voting), casing transition detection, recursive decoding limits, cycle detection, expansion limits, edge cases. ✅ DONE (2026-02-20/21)
 
 ### Implementation Plan
 **Phase 1 (P0)**: Complete buff-sweeping in evaluation, add per-probe validation tests

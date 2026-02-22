@@ -103,6 +103,19 @@ All test files use `_scan()` wrapper with pre-loaded model. See topic files for 
 - high_entropy threshold (>=4.0) too aggressive -- fires on ALL professional text >50 chars
 - weird_casing (>=6 transitions) fires on CamelCase, Title Case, markdown headers
 
+## L2 Obfuscation Bug Research (2026-02-20)
+- See `bug-bounty-research.md` in projects memory for FULL report
+- **Entropy calibration**: Short text threshold 4.1 is borderline; recommend 4.3 + KL-divergence gate
+  - Normal English: 2.8-4.5 entropy. Base64: 3.5-5.3. Hex: 3.0-3.3. ROT13: identical to plaintext
+  - TruffleHog uses 4.5 for base64, 3.0 for hex. Yelp detect-secrets uses 4.5/3.0 defaults
+  - Composite scoring (entropy + KL-div + compression) better than entropy-only
+  - KL-divergence from English: normal=0.2-1.5, base64=2.0-3.8, hex=6.0+
+- **Recursive decode**: Current flat counter doesn't handle nesting; need true recursive unwrap
+  - CyberChef Magic: branching tree, configurable depth, entropy+chi-squared scoring
+  - FortiWeb WAF: recursive URL decode up to 16 rounds
+  - Recommended: max_depth=4, max_total_decodes=8, cycle detection via content hashing
+- **15 common AI bug-fixing mistakes** documented with prevention strategies
+
 ## FP Root Causes (Priority Order)
 1. **high_entropy** (Shannon >= 4.0): Fires on professional text, JSON, code, URLs
 2. **weird_casing** (>= 6 transitions): Fires on CamelCase, markdown, Title Case

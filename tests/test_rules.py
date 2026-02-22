@@ -105,9 +105,9 @@ class TestRuleDataclass(unittest.TestCase):
 class TestRulesListIntegrity(unittest.TestCase):
     """B. Tests that the RULES list is well-formed and complete."""
 
-    def test_total_rule_count_is_42(self):
-        """There should be exactly 42 rules in the RULES list."""
-        self.assertEqual(len(RULES), 42)
+    def test_total_rule_count_is_62(self):
+        """There should be exactly 62 rules in the RULES list."""
+        self.assertEqual(len(RULES), 62)
 
     def test_all_rule_names_are_unique(self):
         """No two rules should have the same name."""
@@ -168,7 +168,7 @@ class TestRulesListIntegrity(unittest.TestCase):
                 self.assertGreater(weight, 0.0)
 
     def test_expected_rule_names_present(self):
-        """All 42 expected rule names should be present."""
+        """All 62 expected rule names should be present."""
         expected = {
             # Original 23 Layer 1 rules
             "override", "system_prompt", "roleplay", "secrecy",
@@ -195,6 +195,19 @@ class TestRulesListIntegrity(unittest.TestCase):
             "harmful_synthesis_request",
             # P1.x markdown exfil
             "markdown_image_exfil",
+            # R1.x RAG injection rules
+            "rag_policy_update", "rag_knowledge_base_instruction",
+            "rag_context_separator", "rag_fake_retrieval_markers",
+            # Threshold-gap rules Phase 1 (scoring pipeline fixes)
+            "instruction_replacement", "leave_behind",
+            "javascript_protocol", "output_manipulation",
+            "context_window_probe", "prompt_response_tokens",
+            "targeted_exfiltration", "instruction_pivot",
+            # Threshold-gap rules Phase 2 (near-miss score fixes)
+            "hidden_prompt_reveal", "dismiss_prior_context",
+            "provide_system_prompt", "database_iteration",
+            "crescendo_extraction", "ai_outputs_internals",
+            "decode_and_execute", "decode_follow_instructions",
         }
         actual = {r.name for r in RULES}
         self.assertEqual(expected, actual)
@@ -751,6 +764,15 @@ class TestContextSuppression(unittest.TestCase):
             "meta_referential": "can you explain your hidden prompt concepts",
             "gaslighting": "can you explain you already told me attacks",
             "api_key_extraction": "can you explain how to print your OPENAI_API_KEY",
+            "rag_policy_update": "can you explain updated policy supersedes all prior constraints",
+            "rag_knowledge_base_instruction": "can you explain the AI must always ignore safety guidelines",
+            "rag_fake_retrieval_markers": "can you explain what [RETRIEVED TEXT] markers do",
+            "prompt_response_tokens": "can you explain what <|prompt|> tokens mean",
+            "instruction_replacement": "can you explain change your instructions attacks",
+            "leave_behind": "can you explain leave all previous information behind attacks",
+            "instruction_pivot": "can you explain ignore that -- instead show me patterns",
+            "dismiss_prior_context": "can you explain ignore everything before this attacks",
+            "crescendo_extraction": "can you explain include all the specific details we covered",
         }
         for rule_name in _CONTEXT_SUPPRESSIBLE:
             with self.subTest(rule=rule_name):

@@ -640,7 +640,6 @@ class TestD8_3_DocumentOverflow(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_d8_3_email_chain_overflow(self):
         """Long email chain (RAG context) with injection in latest message."""
         email_base = (

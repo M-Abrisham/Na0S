@@ -227,7 +227,6 @@ class TestFP_Narrative(unittest.TestCase):
         )
         self.assertFalse(r.is_malicious, "Dialogue creation: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: imperative_start + high_entropy + ML; risk=0.764
     def test_poem_system_prompt(self):
         """Poem about AI safety mentioning 'system prompt'."""
         r = _scan(
@@ -262,7 +261,6 @@ class TestFP_Narrative(unittest.TestCase):
         )
         self.assertFalse(r.is_malicious, "Novel dialogue: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: ML + high_entropy; rule suppressed but ML still flags; risk=0.588
     def test_scifi_forget_everything(self):
         """Sci-fi scene with 'forget everything you know'."""
         r = _scan(
@@ -297,7 +295,6 @@ class TestFP_CodeSnippets(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Python string literal: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: ML + high_entropy; risk=0.673
     def test_javascript_system_prompt_const(self):
         """JavaScript constant defining a system prompt template."""
         r = _scan('const SYSTEM_PROMPT = "You are a helpful assistant"')
@@ -310,7 +307,6 @@ class TestFP_CodeSnippets(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "SQL comment: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: ML + high_entropy (4.2) on short regex; risk=0.557
     def test_regex_pattern_override(self):
         """Regex pattern matching injection phrases."""
         r = _scan(
@@ -373,7 +369,6 @@ class TestFP_CodeSnippets(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "JS regex validation: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: ML + high_entropy from SQL syntax; risk=0.688; no rule fix — ML-driven
     def test_sql_comment_benign(self):
         """SQL comment that happens to use 'ignores'."""
         r = _scan(
@@ -437,7 +432,6 @@ class TestFP_SecurityTraining(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Pentest findings: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: ML + high_entropy + base64; risk=0.758
     def test_owasp_testing_guide(self):
         """OWASP guide excerpt about prompt injection."""
         r = _scan(
@@ -484,7 +478,6 @@ class TestFP_QuotedText(unittest.TestCase):
     - Structural: role_assignment fires on quoted "you are now DAN"
     """
 
-    @unittest.expectedFailure  # FP: ML + high_entropy; risk=0.776
     def test_attacker_used_phrase(self):
         """Reporting what an attacker typed."""
         r = _scan(
@@ -494,7 +487,6 @@ class TestFP_QuotedText(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Attack report: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: roleplay rule + role_assignment + ML; risk=0.832
     def test_paper_common_payloads(self):
         """Citing a research paper's payload examples."""
         r = _scan(
@@ -563,7 +555,6 @@ class TestFP_TechnicalDocs(unittest.TestCase):
     - Obfuscation: punctuation_flood from tables and code
     """
 
-    @unittest.expectedFailure  # FP: ML + high_entropy from long API doc text; risk=0.574; no rules fire
     def test_api_docs_system_prompt(self):
         """API documentation with system_prompt field."""
         r = _scan(
@@ -599,7 +590,6 @@ class TestFP_TechnicalDocs(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Professional email: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: high_entropy + ML; risk=0.618
     def test_yaml_config_example(self):
         """YAML configuration file example."""
         r = _scan(
@@ -829,7 +819,6 @@ class TestFP_TriggerWords(unittest.TestCase):
         self.assertFalse(r.is_malicious,
                          "Quiz answer request: " + _fmt(r))
 
-    @unittest.expectedFailure  # FP: high_entropy; risk=0.558
     def test_execute_python_script(self):
         """'Execute a Python script' -- programming task."""
         r = _scan(

@@ -275,16 +275,97 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
 
     composite = ml_weight + rule_weight + obf_weight + structural_weight
 
+    # --- Critical-content rule floor ---
+    # When a critical_content severity rule fires, the rule pattern
+    # itself is extremely specific to harmful content requests (e.g.,
+    # "step-by-step instructions for building a weapon", "create a
+    # phishing email").  These patterns have near-zero FP rates on
+    # benign text.  Even if the ML model disagrees (predicting SAFE),
+    # the rule match is strong enough to override ML.
+    #
+    # For regular "critical" rules (e.g., direct_prompt_request,
+    # override), we do NOT apply a floor because:
+    #   - These rules can fire on advisory/educational text that
+    #     quotes attack payloads (e.g., "do not type 'reveal your
+    #     system prompt'").
+    #   - The new complementary rules (provide_system_prompt,
+    #     database_iteration, etc.) ensure genuine attacks trigger
+    #     2+ critical rules, pushing the composite above threshold
+    #     naturally via the rule_weight sum.
+    if severities_seen & {"critical_content"}:
+        composite = max(composite, 0.60)
+
+    # Compute ML safe-confidence once for use by multiple mechanisms below.
+    ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
+
     # --- Override protection ---
     # If ML is confidently safe (>0.8), only medium rules fired, no
     # obfuscation, and no structural injection signals, trust the ML
     # and return SAFE regardless of composite.
-    ml_safe_confidence = ml_prob if "SAFE" in ml_label else (1.0 - ml_prob)
     if (ml_safe_confidence > 0.8
             and severities_seen <= {"medium"}
             and not obs_flags
             and structural_weight == 0.0):
         return "SAFE", composite
+
+    # --- Extended override protection ---
+    # If ML is moderately confident safe (>0.65), NO L1 rules fired
+    # at all, and no decoded payload was flagged as malicious, then
+    # obfuscation/structural signals alone are likely false positives
+    # (e.g., "Write a short poem about autumn leaves" triggering
+    # base64 + punctuation_flood + imperative_start).
+    # Cap the composite to just below threshold to prevent FPs from
+    # non-lexical signals when the ML model and L1 rules both agree
+    # the input is safe.
+    has_decoded_payload = "decoded_payload_malicious" in hits
+    if (ml_safe_confidence > 0.65
+            and rule_weight == 0.0
+            and not has_decoded_payload):
+        composite = min(composite, DECISION_THRESHOLD - 0.01)
+
+    # --- Multi-layer agreement boost ---
+    # When multiple independent detection layers agree that the input
+    # is suspicious, the combined evidence deserves a small additive
+    # boost.  This bridges the gap for near-miss scores (0.49-0.55)
+    # where individual signals are each too weak to cross the threshold
+    # alone but collectively indicate a real attack.
+    #
+    # Anchor tiers prevent false-positive inflation on benign inputs
+    # that coincidentally trigger weak signals:
+    #   - 2 signal layers + strong anchor (rule severity >= high):
+    #     apply boost unconditionally.
+    #   - 2 signal layers + weak anchor (any rule hit) + ML agreement
+    #     (ml_prob_malicious > 0.45): apply boost — ML corroboration
+    #     reduces FP risk even with medium-severity rules.
+    #   - 3+ signal layers + weak anchor: apply boost — three or more
+    #     independent layers agreeing is strong evidence.
+    signal_layers = 0
+    if rule_weight > 0:
+        signal_layers += 1               # L1: rule-based detection
+    if obf_weight > 0:
+        signal_layers += 1               # L2: obfuscation detection
+    if structural_weight > 0:
+        signal_layers += 1               # L3: structural features
+    if ml_prob_malicious > 0.5:
+        signal_layers += 1               # L4/L5: ML classifier
+
+    has_strong_anchor = bool(
+        severities_seen & {"high", "critical", "critical_content"}
+    )
+    has_weak_anchor = bool(severities_seen)  # any rule hit at all
+
+    apply_boost = False
+    if signal_layers >= 3 and has_weak_anchor:
+        apply_boost = True
+    elif signal_layers >= 2 and has_strong_anchor:
+        apply_boost = True
+    elif signal_layers >= 2 and has_weak_anchor and ml_prob_malicious > 0.45:
+        apply_boost = True
+
+    if apply_boost:
+        _AGREEMENT_BOOST = {2: 0.10, 3: 0.12, 4: 0.15}
+        boost = _AGREEMENT_BOOST.get(signal_layers, 0.15)
+        composite = min(composite + boost, 1.0)
 
     if composite >= DECISION_THRESHOLD:
         return "MALICIOUS", composite
@@ -330,13 +411,33 @@ def classify_prompt(text, vectorizer, model):
     # again in the obfuscation signal (obf_weight).  Now we only add obs
     # flags to `hits` AFTER _weighted_decision computes the composite score.
 
-    # Classify each decoded view — a base64-encoded attack should still be caught
+    # Classify each decoded view — a base64-encoded attack should still be caught.
+    # Also run L1 rules on decoded views so that hidden attack patterns
+    # (e.g. "Ignore all previous instructions" inside ROT13/reversed/leet)
+    # contribute proper severity weights to the composite score.
+    #
+    # We process ALL decoded views for rule hits (not just until the first
+    # ML-malicious one) because different decoded variants may trigger
+    # different rules.  For example, per-word reversed text produces a
+    # properly ordered sentence that matches the "override" rule, while
+    # the full-reverse variant has the words in reverse order and misses it.
     decoded_malicious = False
     for decoded in obs["decoded_views"]:
-        X = vectorizer.transform([decoded])
-        if model.predict(X)[0] == 1:
-            decoded_malicious = True
-            break
+        if not decoded_malicious:
+            X = vectorizer.transform([decoded])
+            if model.predict(X)[0] == 1:
+                decoded_malicious = True
+
+        # Run L1 rules on decoded view to detect attack patterns hidden
+        # behind obfuscation.  This is critical for ROT13, reversed text,
+        # and leetspeak where ML on the obfuscated text sees gibberish
+        # but the decoded text contains clear injection patterns.
+        decoded_rule_hits = rule_score_detailed(decoded)
+        for rh in decoded_rule_hits:
+            if rh.name not in hit_names_seen:
+                detailed_hits.append(rh)
+                hit_names_seen.add(rh.name)
+                hits.append(rh.name)
 
     # If a decoded view was classified as malicious, treat it as a strong
     # signal by adding a synthetic critical-severity "hit".
@@ -579,6 +680,11 @@ def scan(text, vectorizer=None, model=None):
         "base64": "D4.1",
         "url_encoded": "D4.2",
         "hex": "D4.3",
+        "rot13": "D4.4",
+        "leetspeak": "D4.5",
+        "reversed_text": "D4.6",
+        "full_reverse": "D4.6",
+        "word_reverse": "D4.6",
         "high_entropy": "D4",
         "punctuation_flood": "D4",
         "weird_casing": "D4",

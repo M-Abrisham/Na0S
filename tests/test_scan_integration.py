@@ -722,7 +722,6 @@ class TestKnownLimitations(unittest.TestCase):
     multilingual/indirect injection evasion.
     """
 
-    @unittest.expectedFailure
     def test_known_fp_educational_prompt(self):
         """KNOWN FP: Educational question about prompt injection.
 
