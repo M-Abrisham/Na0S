@@ -500,8 +500,9 @@ class TestLLMCheckerInit(unittest.TestCase):
         checker = LLMChecker(api_key="explicit-key")
         mock_groq_cls.assert_called_once_with(api_key="explicit-key")
 
+    @patch("na0s.llm_checker.Groq")
     @patch.dict(os.environ, {}, clear=True)
-    def test_init_no_key_raises_value_error(self):
+    def test_init_no_key_raises_value_error(self, mock_groq_cls):
         """Raises ValueError when no api_key and GROQ_API_KEY is not set."""
         # Remove GROQ_API_KEY if it was set in the actual environment
         os.environ.pop("GROQ_API_KEY", None)

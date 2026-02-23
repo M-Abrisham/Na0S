@@ -16,7 +16,10 @@ import secrets
 from dataclasses import dataclass
 from typing import Optional
 
-from groq import Groq
+try:
+    from groq import Groq
+except ImportError:
+    Groq = None  # type: ignore[assignment,misc]
 
 DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
@@ -64,6 +67,11 @@ CHECKER_INPUT_MAX_CHARS = 4000
 
 class LLMChecker:
     def __init__(self, api_key: Optional[str] = None):
+        if Groq is None:
+            raise ImportError(
+                "groq package is required for LLMChecker. "
+                "Install it with: pip install na0s[llm]"
+            )
         resolved_key = api_key or os.getenv("GROQ_API_KEY")
         if not resolved_key:
             raise ValueError("GROQ_API_KEY is not set and no api_key was provided.")
