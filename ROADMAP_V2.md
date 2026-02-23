@@ -139,9 +139,9 @@ All 8 values externalized into named constants with `L0_*` env var overrides. Sa
 
 ## Layer 1: IOC / Signature Rules Engine
 
-**Files**: `src/rules.py`
-**Tests**: `tests/test_rules.py` (176 tests)
-**Status**: Active — 42 rules covering ~30+ technique IDs with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules, angle bracket homoglyph bypass protection, destructive action detection
+**Files**: `src/na0s/layer1/` (7 modules: analyzer.py, rules_registry.py, context.py, paranoia.py, result.py, unicode_defense.py, ioc_extractor.py)
+**Tests**: `tests/test_rules.py` (269 tests), `tests/test_ioc_extractor.py` (73 tests)
+**Status**: Active — 66 rules covering ~35+ technique IDs with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules, angle bracket homoglyph bypass protection, destructive action detection, 4 new rules (D1.14, D1.19, D6 Latin, D6 CJK), IOC refang alt_view, 20-language multilingual detection
 
 ### Updated Description
 Layer 1 is a regex-based signature engine that detects known attack patterns. Has 42 pre-compiled rules (5 original + 13 roadmap + 5 novel + 10 E1/P1 extraction + 7 O1/O2 content-safety + 1 worm + 1 destructive) with paranoia level filtering (PL1-PL4, env-configurable via RULES_PARANOIA_LEVEL). All 6 bugs fixed (technique mismap, duplicate eval, severity underrating, DRY violation, raw-text-only, pattern divergence). Novel industry-first detectors: summarization extraction, authority escalation, constraint negation, meta-referential probing, gaslighting. Context-aware suppression (educational/question/quoting/code/narrative frames) prevents FPs on legitimate security discussions. All patterns are ReDoS-safe. Rules are integrated into both `predict.py` and `cascade.py` with dual-pass (raw + sanitized text). Unicode angle bracket homoglyph folding (12 variants) protects all XML/chat-template rules from bypass.
@@ -195,18 +195,18 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 - [x] **Angle bracket homoglyph bypass fix** — `_fold_angle_homoglyphs()` normalizes 12 Unicode look-alike characters (U+3008 〈, U+FF1C ＜, U+27E8 ⟨, U+FE64 ﹤, U+276C ❬, U+2039 ‹ + right variants) to ASCII `<>` before rule matching. Protects `xml_role_tags`, `fake_system_prompt`, `chat_template_injection` from bypass. 16 tests in `test_rules.py`. **Priority**: P0-CRITICAL. ✅ DONE (2026-02-19)
 - [x] **T1.2 Destructive action injection** — `destructive_action` rule, PL1, severity critical. Detects `rm -rf /`, `DROP TABLE`, `TRUNCATE TABLE`, `DELETE FROM`, `kill -9`, `shutdown now`, `git push --force`, `git reset --hard`, `format C:`. 18 tests. **Priority**: P0. ✅ DONE (2026-02-19)
 
-**Medium Priority (P2):**
-- [ ] D1.14 Hypothetical-response-priming (high FP risk — needs careful tuning)
-- [ ] D6 Multilingual-ignore keywords in top 20 languages
+**Medium Priority (P2):** DONE (2026-02-23)
+- [x] D1.14 Hypothetical-response-priming — `hypothetical_bypass` rule, PL2, severity=high. Co-occurrence anchoring: hypothetical frame + safety-bypass language within 120 chars. Context-suppressible. 20 tests. ✅ DONE (2026-02-23)
+- [x] D6 Multilingual-ignore keywords in top 20 languages — `multilingual_override_latin` (10 Latin-script languages: FR/ES/PT/DE/IT/ID/TR/PL/NL/VI, PL2) + `multilingual_override_cjk` (9 non-Latin scripts: ZH/JA/KO/AR/RU/HI/HE/TH/FA, PL1). Both context-suppressible. Traditional Chinese + Hindi SOV support. 50 tests. ✅ DONE (2026-02-23)
 - [x] D1.11 Skeleton-key patterns — COVERED by `constraint_negation` + `authority_escalation` rules
-- [ ] D1.19 Recursive-jailbreak: `r"(?:generate|write|create).{0,40}(?:jailbreak|bypass|override)\s+(?:prompt|technique)"`
+- [x] D1.19 Recursive-jailbreak — `recursive_jailbreak` rule, PL2, severity=high. 4 sub-patterns: direct generation, method design, list/enumerate, named jailbreak (DAN/STAN/AIM/DUDE/KEVIN). Context-suppressible. 23 tests. ✅ DONE (2026-02-23)
 
 #### REMAINING (From original roadmap)
 - [x] **Paranoia level system** — Added `paranoia_level` field to `Rule` dataclass. Filtering by `_PARANOIA_LEVEL` (env: `RULES_PARANOIA_LEVEL`, default=2). PL1=production, PL2=moderate, PL3=high, PL4=audit. `get_paranoia_level()` / `set_paranoia_level()` API. DONE (2026-02-18)
 - [ ] **YARA rule engine** — Replace/supplement regex with `yara-python` for multi-pattern matching, combinatorial conditions, and hot-reloadable rule files. **Priority**: P1. **Effort**: Medium.
 - [ ] **Known injection phrase database** — Extract phrases from Garak probes, JailbreakBench, HackaPrompt, Tensor Trust datasets for rule generation. **Priority**: P1.
 - [x] **PII pre-screen** — Pure-regex in `pii_detector.py` with Luhn validation. DONE (2026-02-15)
-- [ ] **IOC extraction** — Use `iocextract` for defang-aware URL/IP/email extraction. **Priority**: P1.
+- [x] **IOC extraction** — Custom pure-stdlib `ioc_extractor.py` module (iocextract GPL-blocked). `refang()` for 15+ defanging patterns, `extract_iocs()` for URLs/IPs/emails/hashes. Integrated into analyzer.py as alt_view. 73 tests. ✅ DONE (2026-02-23)
 - [x] **Recursive unpacking (Matryoshka)** — Replaced flat `max_decodes=2` with recursive `_scan_single_layer()` + `obfuscation_scan()` (max_depth=4, cycle detection, expansion limit). ✅ DONE (2026-02-20)
 - [x] **RAG "policy update" injection rule** — `rag_policy_update` (R1.1), PL2, severity=high. Pattern: `(?:updated|new|revised)\s+(?:policy|guideline)s?\s+.{0,80}(?:supersede|override|replace)`. Context-suppressible. 67 tests. ✅ DONE (2026-02-20)
 - [x] **RAG "knowledge base instruction" rule** — `rag_knowledge_base_instruction` (R1.2), PL2, severity=high. Restructured regex: `always/never` require following malicious verb (ignore/disregard/forget/override/bypass/skip) to avoid FP on benign AI docs. Context-suppressible. ✅ DONE (2026-02-20)
@@ -216,7 +216,8 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 ### Implementation Plan
 **Phase 1**: ~~Add paranoia levels + 6 P0 rules → ~15%~~ ✅ DONE (2026-02-18)
 **Phase 2**: ~~Add 7 P1 rules + 5 novel rules + 6 bug fixes + single-pass refactor → ~22%~~ ✅ DONE (2026-02-18)
-**Phase 3**: YARA migration + phrase database integration + IOC extraction + multilingual rules → ~40% coverage
+**Phase 3**: ~~IOC extraction + multilingual rules + D1.14 + D1.19~~ ✅ DONE (2026-02-23) — 4 new rules, IOC module, 7 audit bug fixes, 146 new tests
+**Phase 4**: YARA migration + phrase database integration → ~45% coverage
 
 ---
 

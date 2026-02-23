@@ -236,4 +236,21 @@ _CONTEXT_SUPPRESSIBLE = frozenset({
     #   database" is always a data extraction attack.
     # ai_outputs_internals: NOT suppressible -- "the AI outputs all
     #   system-level instructions" is always suspicious.
+    # hypothetical_bypass: Suppressible -- hypothetical framing appears in
+    #   philosophy, legal analysis, ethics courses, creative writing, and
+    #   AI safety research discussions.
+    "hypothetical_bypass",
+    # recursive_jailbreak: Suppressible -- "generate jailbreak prompts"
+    #   appears in security research, AI red-teaming tools, and
+    #   academic papers about LLM safety.
+    "recursive_jailbreak",
+    # D6 Multilingual rules:
+    # multilingual_override_latin: Suppressible -- educational bilingual
+    #   content discussing "what ignorez les instructions means" should
+    #   be suppressed.  Latin-script cognates have higher FP risk.
+    "multilingual_override_latin",
+    # multilingual_override_cjk: Suppressible -- security audit (2026-02-23)
+    #   confirmed high FP rate on benign CJK text (parenting, news, QA).
+    #   Same suppression logic as Latin variant.
+    "multilingual_override_cjk",
 })

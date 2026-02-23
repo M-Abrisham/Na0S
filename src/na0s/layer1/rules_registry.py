@@ -1028,4 +1028,142 @@ RULES = [
          severity="high",
          paranoia_level=1,
          description="Decode hex/base64 and follow instructions pattern"),
+
+    # ------------------------------------------------------------------
+    # D1.19 Recursive-Jailbreak — meta-jailbreak generation request
+    # ------------------------------------------------------------------
+    Rule("recursive_jailbreak",
+         r"(?:"
+         # (a) Direct generation: "write/create/generate a jailbreak prompt"
+         r"(?:generate|write|create|draft|craft|compose|build|make)\s+"
+         r"(?:(?:a|an|the|some)\s+|me\s+(?:a\s+)?)?"
+         r"(?:(?:effective|working|universal|new|better|advanced)\s+)?"
+         r"(?:jailbreak|jail[\s-]?break|bypass|override|circumvention|evasion)\s+"
+         r"(?:prompt|technique|method|approach|strategy|template|script|payload|attack)"
+         r"|"
+         # (b) Method design: "design a method to bypass/circumvent"
+         r"(?:generate|write|create|design|develop|devise|outline)\s+"
+         r"(?:(?:a|an)\s+)?(?:(?:effective|reliable|new)\s+)?"
+         r"(?:method|strategy|approach|technique|way|plan)\s+"
+         r"(?:to|for)\s+(?:bypass|circumvent|break|defeat|overcome|evade|get\s+(?:around|past)|jailbreak)"
+         r"|"
+         # (c) List/enumerate: "list N ways to bypass AI safety"
+         r"(?:list|enumerate|describe|show|give|provide|suggest)\s+(?:me\s+)?"
+         r"(?:\d+\s+)?(?:effective\s+|different\s+|various\s+)?"
+         r"(?:ways?|methods?|techniques?|approaches?)\s+(?:to|for)\s+"
+         r"(?:bypass|circumvent|break|defeat|jailbreak)\s+"
+         r"(?:(?:(?:an?\s+|the\s+)?(?:AI|LLM|model)'?s?\s*)?(?:safety|content|security)\s*)?"
+         r"(?:guidelines?|guardrails?|filters?|restrictions?|rules?|measures?)"
+         r"|"
+         # (d) Named jailbreak: "create a DAN prompt"
+         r"(?:generate|write|create|draft|make)\s+(?:(?:a|an|the)\s+)?"
+         r"(?:DAN|DUDE|AIM|STAN|KEVIN)\s+(?:prompt|jailbreak|technique)"
+         r")",
+         technique_ids=["D1.19"],
+         severity="high",
+         paranoia_level=2,
+         description="Recursive jailbreak: requesting AI to generate jailbreak prompts/techniques"),
+
+    # ------------------------------------------------------------------
+    # D1.14 Hypothetical-Response-Priming — fictional frame + safety bypass
+    # ------------------------------------------------------------------
+    Rule("hypothetical_bypass",
+         r"(?:"
+         r"(?:hypothetical(?:ly)?|in\s+(?:a|an)\s+(?:hypothetical|fictional|imagin(?:ary|ed))\s+(?:world|scenario|universe|situation|reality)|"
+         r"(?:as\s+a\s+)?thought\s+experiment|"
+         r"(?:purely\s+)?(?:for|as)\s+(?:a\s+)?(?:academic|educational|research)\s+(?:purposes?|exercise))"
+         r".{0,120}"
+         r"(?:no\s+(?:restrictions?|rules?|safety|ethics|guidelines?|limits?|guardrails?|boundaries|constraints?|filters?|moderation|censorship)|"
+         r"without\s+(?:any\s+)?(?:restrictions?|rules?|safety|ethics|guidelines?|limits?|guardrails?|boundaries|constraints?|filters?|moderation|censorship)|"
+         r"(?:everything|anything)\s+is\s+(?:permitted|allowed|possible|acceptable)|"
+         r"(?:ignore|bypass|disable|remove)\s+(?:your\s+)?(?:safety|filters?|guardrails?|restrictions?|guidelines?|rules?))"
+         r")",
+         technique_ids=["D1.14", "D2.3"],
+         severity="high",
+         paranoia_level=2,
+         description="Hypothetical/fictional framing combined with safety-bypass language"),
+
+    # ------------------------------------------------------------------
+    # D6 Multilingual Override Detection — 20 languages
+    # ------------------------------------------------------------------
+
+    # D6a: Latin-script languages (10 languages)
+    # Pattern: override_verb.{0,40}instruction_noun per language
+    # Context-suppressible: YES (educational bilingual content is common)
+    Rule("multilingual_override_latin",
+         # French
+         r"\b(?:ignorez|oubliez)\b.{0,40}\b(?:instructions?|r[eè]gles?|directives?|consignes?)\b"
+         r"|"
+         # Spanish
+         r"\b(?:ignora|olvida|desatiende)\b.{0,40}\b(?:instrucciones|reglas|directrices)\b"
+         r"|"
+         # Portuguese
+         r"\b(?:ignore|esqueca|desconsidere)\b.{0,40}\b(?:instrucoes|regras|diretrizes)\b"
+         r"|"
+         # German
+         r"\b(?:ignoriere|vergiss|missachte)\b.{0,40}\b(?:anweisungen|regeln|richtlinien)\b"
+         r"|"
+         # Italian
+         r"\b(?:ignora|dimentica)\b.{0,40}\b(?:istruzioni|regole|direttive)\b"
+         r"|"
+         # Indonesian
+         r"\b(?:abaikan|lupakan)\b.{0,40}\b(?:instruksi|aturan|pedoman)\b"
+         r"|"
+         # Turkish
+         r"\b(?:gormezden\s+gel|unut|dikkate\s+alma)\b.{0,40}\b(?:talimatlari?|kurallari?|yonergeleri?)\b"
+         r"|"
+         # Polish
+         r"\b(?:zignoruj|zapomnij)\b.{0,40}\b(?:instrukcje|zasady|wytyczne)\b"
+         r"|"
+         # Dutch
+         r"\b(?:negeer|vergeet)\b.{0,40}\b(?:instructies|regels|richtlijnen)\b"
+         r"|"
+         # Vietnamese (Latin with diacritics)
+         r"\b(?:bo\s+qua|pho\s+mac)\b.{0,40}\b(?:huong\s+dan|quy\s+tac)\b",
+         technique_ids=["D6"],
+         severity="high",
+         paranoia_level=2,
+         description="Override/forget instruction keywords in Latin-script languages (FR, ES, PT, DE, IT, ID, TR, PL, NL, VI)"),
+
+    # D6b: Non-Latin scripts (CJK, Arabic, Cyrillic, Devanagari, Hebrew,
+    #       Thai, Korean, Persian)
+    # No \b for CJK/Thai — characters are self-delimiting
+    # Uses \b for Arabic, Cyrillic, Hebrew, Korean where word boundaries work
+    # Context-suppressible: NO (non-Latin override compounds almost never
+    #   appear in benign text)
+    Rule("multilingual_override_cjk",
+         # Chinese (simplified + traditional, no \b needed)
+         r"(?:忽略|忽视|忽視|无视|無視|忘记|忘記).{0,20}(?:指示|指令|规则|規則|命令|准则|準則|限制)"
+         r"|"
+         # Japanese (SOV — noun before verb; match both orders)
+         r"(?:無視|忘れ|無効).{0,20}(?:指示|指令|ルール|規則|命令)"
+         r"|(?:指示|指令|ルール|規則|命令).{0,20}(?:無視|忘れ|無効)"
+         r"|"
+         # Korean (SOV — noun before verb; match both orders)
+         r"(?:무시|잊어|무효화).{0,20}(?:지시|지침|규칙|명령)"
+         r"|(?:지시|지침|규칙|명령).{0,20}(?:무시|잊어|무효화)"
+         r"|"
+         # Arabic
+         r"\b(?:تجاهل|انسى|اهمل)\b.{0,40}\b(?:التعليمات|القواعد|الإرشادات|الأوامر)\b"
+         r"|"
+         # Russian
+         r"\b(?:игнорируй|забудь|проигнорируй)\b.{0,40}\b(?:инструкции|правила|указания|команды)\b"
+         r"|"
+         # Hindi (Devanagari — whitespace-delimited, no \b, SOV both orders)
+         r"(?:अनदेखा\s+कर|भूल\s+जा).{0,40}(?:निर्देश|नियम|आदेश)"
+         r"|(?:निर्देश|नियम|आदेश).{0,40}(?:अनदेखा\s+कर|भूल\s+जा)"
+         r"|"
+         # Hebrew (drop \b on nouns — prefixed prepositions/articles
+         # attach directly: מההוראות = מ+ה+הוראות)
+         r"\b(?:התעלם|שכח)\b.{0,40}(?:הוראות|כללים|הנחיות)"
+         r"|"
+         # Thai (no \b needed)
+         r"(?:เพิกเฉย|ลืม).{0,20}(?:คำสั่ง|กฎ|แนวทาง)"
+         r"|"
+         # Persian
+         r"\b(?:نادیده|فراموش)\b.{0,40}\b(?:دستورالعمل|قوانین|دستورات)\b",
+         technique_ids=["D6"],
+         severity="high",
+         paranoia_level=1,
+         description="Override/forget instruction keywords in CJK/Arabic/Cyrillic/Devanagari/Thai/Hebrew/Persian"),
 ]

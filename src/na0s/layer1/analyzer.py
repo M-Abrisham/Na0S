@@ -8,6 +8,7 @@ Pre-processing pipeline:
   1. Fold Unicode angle bracket homoglyphs to ASCII
   2. Strip combining marks (Zalgo defense)
   3. Decode plus-signs as spaces (URL-encoded evasion)
+  4. Refang defanged IOCs (hXXp://, [.], [@], etc.)
 
 Single-pass evaluation with context-aware suppression and paranoia filtering.
 """
@@ -44,6 +45,8 @@ def rule_score_detailed(text):
     Zalgo-resilient: strips combining marks (diacritics) to catch attacks
     hidden under stacked combining characters (U+0300-U+036F).
     Plus-sign-aware: decodes '+' as spaces for URL-encoded evasion.
+    IOC-refang-aware: restores defanged IOCs (hXXp://, [.], [@]) to standard
+    form so rules can match URLs/IPs hidden behind analyst notation.
     """
     # Fold Unicode angle bracket look-alikes BEFORE matching.
     # This prevents bypass via ＜system＞, 〈system〉, etc.
@@ -70,6 +73,14 @@ def rule_score_detailed(text):
         plus_decoded = folded.replace("+", " ")
         if plus_decoded != folded:
             alt_views.append(plus_decoded)
+
+    # IOC refanging — if text contains defanged indicators (hXXp://,
+    # [.], [@], etc.), create a refanged view so rules can match the
+    # actual URLs/IPs/domains hidden behind analyst notation.
+    from .ioc_extractor import refang
+    refanged = refang(folded)
+    if refanged != folded:
+        alt_views.append(refanged)
 
     has_context = _has_contextual_framing(folded)
     # Also check context on alternate views to catch framing in decoded text.
@@ -104,8 +115,11 @@ def rule_score_detailed(text):
             continue
         if has_context and rule.name in _CONTEXT_SUPPRESSIBLE:
             continue
-        if rule.name == "roleplay" and _is_legitimate_roleplay(folded):
-            continue
+        if rule.name == "roleplay":
+            if _is_legitimate_roleplay(folded):
+                continue
+            if any(_is_legitimate_roleplay(v) for v in alt_views):
+                continue
         hits.append(RuleHit(
             name=rule.name,
             technique_ids=rule.technique_ids,
