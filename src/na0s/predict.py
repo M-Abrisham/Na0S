@@ -147,6 +147,7 @@ _CHUNK_MAX_TOKENS = 512
 _CHUNK_OVERLAP = 64
 _HEAD_TOKENS = 256
 _TAIL_TOKENS = 256
+MAX_CHUNKS = 20  # Resource-exhaustion cap: prevents O(N) rule passes on huge inputs
 
 
 def _chunk_text(text, max_tokens=_CHUNK_MAX_TOKENS, overlap=_CHUNK_OVERLAP):
@@ -546,6 +547,17 @@ def scan(text, vectorizer=None, model=None):
         ht_text = _head_tail_extract(l0.sanitized_text)
         chunks = _chunk_text(l0.sanitized_text)
 
+        # Resource-exhaustion guard: cap chunk count to prevent O(N)
+        # rule-evaluation passes on adversarially long inputs.
+        input_truncated_chunks = False
+        if len(chunks) > MAX_CHUNKS:
+            logger.warning(
+                "Chunk count %d exceeds MAX_CHUNKS=%d; truncating",
+                len(chunks), MAX_CHUNKS,
+            )
+            chunks = chunks[:MAX_CHUNKS]
+            input_truncated_chunks = True
+
         chunk_hits_set = set()
         chunk_technique_tags = []
         # Analyse HEAD+TAIL extract (single-pass via rule_score_detailed)
@@ -585,6 +597,8 @@ def scan(text, vectorizer=None, model=None):
             risk = min(risk + confirm_boost, 1.0)
 
         hits.append("chunked_analysis")
+        if input_truncated_chunks:
+            hits.append("input_truncated_chunks")
 
     # Map L0 anomaly flags and obfuscation flags to technique_ids
     _L0_FLAG_MAP = {
@@ -697,8 +711,9 @@ def scan(text, vectorizer=None, model=None):
         # language_detector.py flags
         "non_english_input": "D6",
         "mixed_language_input": "D6.3",
-        # chunked analysis flag
+        # chunked analysis flags
         "chunked_analysis": "D7.1",
+        "input_truncated_chunks": "D7.1",
         # pii_detector.py flags
         "pii_credit_card": "E1",
         "pii_ssn": "E1",

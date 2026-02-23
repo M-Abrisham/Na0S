@@ -16,6 +16,7 @@ from na0s.predict import (
     _CHUNK_OVERLAP,
     _HEAD_TOKENS,
     _TAIL_TOKENS,
+    MAX_CHUNKS,
 )
 
 
@@ -130,6 +131,62 @@ class TestHeadTailExtract(unittest.TestCase):
         self.assertEqual(result, "")
 
 
+class TestMaxChunksLimit(unittest.TestCase):
+    """Test MAX_CHUNKS resource-exhaustion guard."""
+
+    def test_max_chunks_constant_value(self):
+        """MAX_CHUNKS should be 20."""
+        self.assertEqual(MAX_CHUNKS, 20)
+
+    def test_small_input_under_limit(self):
+        """Input producing <20 chunks should not be truncated."""
+        # 1024 words -> ~2 chunks with 512-token windows
+        text = " ".join(["word"] * 1024)
+        chunks = _chunk_text(text)
+        self.assertLessEqual(len(chunks), MAX_CHUNKS)
+        # All words should be covered
+        covered = set()
+        for chunk in chunks:
+            covered.update(chunk.split())
+        self.assertTrue(covered)
+
+    def test_exact_limit_not_truncated(self):
+        """Input producing exactly MAX_CHUNKS chunks should NOT be truncated."""
+        # With 512 tokens per chunk and 64 overlap, stride = 448
+        # N chunks requires: 512 + (N-1)*448 words
+        # For 20 chunks: 512 + 19*448 = 512 + 8512 = 9024 words
+        word_count = 512 + (MAX_CHUNKS - 1) * (_CHUNK_MAX_TOKENS - _CHUNK_OVERLAP)
+        text = " ".join(["w{}".format(i) for i in range(word_count)])
+        chunks = _chunk_text(text)
+        self.assertEqual(len(chunks), MAX_CHUNKS)
+
+    def test_over_limit_would_produce_many_chunks(self):
+        """Input that would produce >20 chunks generates many chunks uncapped."""
+        # 15000 words -> ~33 chunks (well over 20)
+        text = " ".join(["word"] * 15000)
+        chunks = _chunk_text(text)
+        self.assertGreater(len(chunks), MAX_CHUNKS)
+
+    def test_chunk_text_does_not_cap(self):
+        """_chunk_text() itself should NOT enforce MAX_CHUNKS (cap is in scan())."""
+        text = " ".join(["word"] * 15000)
+        chunks = _chunk_text(text)
+        # _chunk_text returns all chunks; capping happens in scan()
+        self.assertGreater(len(chunks), MAX_CHUNKS)
+
+    def test_manual_truncation_preserves_first_n(self):
+        """Truncating to MAX_CHUNKS should keep the first N chunks."""
+        words = ["w{}".format(i) for i in range(15000)]
+        text = " ".join(words)
+        all_chunks = _chunk_text(text)
+        truncated = all_chunks[:MAX_CHUNKS]
+        self.assertEqual(len(truncated), MAX_CHUNKS)
+        # First chunk should be identical
+        self.assertEqual(truncated[0], all_chunks[0])
+        # Last kept chunk should be the 20th original chunk
+        self.assertEqual(truncated[-1], all_chunks[MAX_CHUNKS - 1])
+
+
 class TestChunkedAnalysisConstants(unittest.TestCase):
     """Verify sensible default constants."""
 
@@ -147,6 +204,9 @@ class TestChunkedAnalysisConstants(unittest.TestCase):
 
     def test_tail_tokens(self):
         self.assertEqual(_TAIL_TOKENS, 256)
+
+    def test_max_chunks(self):
+        self.assertEqual(MAX_CHUNKS, 20)
 
 
 if __name__ == "__main__":

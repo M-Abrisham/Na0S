@@ -478,6 +478,113 @@ def _count_compat_chars(text):
     return count
 
 
+def _extract_tag_stego(text):
+    """Extract hidden ASCII from Unicode Tag Characters (U+E0001-U+E007F).
+
+    Unicode Tag Characters map 1:1 to ASCII via ``chr(codepoint - 0xE0000)``.
+    Attackers embed invisible instructions (e.g. "ignore all rules") as tag
+    characters that are invisible in rendered text but processed by LLMs.
+
+    Must be called BEFORE ``strip_invisible_chars()`` because tag chars have
+    Unicode category Cf and would be silently removed, losing the hidden
+    payload forever.
+
+    References:
+    - Cisco: Understanding and Mitigating Unicode Tag Prompt Injection
+    - AWS: Defending LLM Applications Against Unicode Character Smuggling
+    - Trend Micro: Invisible Prompt Injection (Jan 2025)
+    - HackerOne #2372363: Invisible Prompt Injection via Unicode Tags
+
+    Returns
+    -------
+    str
+        The decoded ASCII message, or empty string if no tag chars found.
+    """
+    decoded = []
+    for ch in text:
+        cp = ord(ch)
+        if 0xE0001 <= cp <= 0xE007F:
+            decoded.append(chr(cp - 0xE0000))
+    return "".join(decoded) if decoded else ""
+
+
+def _extract_variation_selector_stego(text):
+    """Extract hidden data from Variation Selector steganography.
+
+    Variation Selectors (VS1-VS16: U+FE00-U+FE0F, VS17-VS256:
+    U+E0100-U+E01EF) are invisible Unicode category Mn (Nonspacing Mark)
+    characters.  The "Sneaky Bits" technique maps each byte (0-255) to one
+    of the 256 variation selectors:
+
+        byte 0-15   -> U+FE00 + byte      (VS1-VS16)
+        byte 16-255 -> U+E0100 + (byte-16) (VS17-VS256)
+
+    Attackers embed these after emoji or other base characters to hide
+    arbitrary payloads (shell commands, prompt injections) that are
+    invisible in rendered text but survive copy-paste and LLM tokenisation.
+
+    Must be called BEFORE ``strip_invisible_chars()`` because once stripped,
+    the hidden payload would be lost.  VS chars have Unicode category Mn
+    which is NOT caught by the Cf/Cc/Cn/Cs filter in strip_invisible_chars.
+
+    References:
+    - Dawid Rylko: "Hiding Data in Emoji" (Unicode Stego via VS)
+    - Veracode: NPM os-info-checker-es6 attack using VS steganography
+    - Unicode Consortium: Variation Selectors chart (U+FE00-FE0F)
+
+    Returns
+    -------
+    str
+        Decoded text from variation selectors, or empty string if fewer
+        than 1 byte could be decoded.
+    """
+    vs_codepoints = []
+    for ch in text:
+        cp = ord(ch)
+        if 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF:
+            vs_codepoints.append(cp)
+
+    if not vs_codepoints:
+        return ""
+
+    # Decode: reverse the byte-to-VS mapping
+    decoded_bytes = []
+    for cp in vs_codepoints:
+        if 0xFE00 <= cp <= 0xFE0F:
+            decoded_bytes.append(cp - 0xFE00)        # byte 0-15
+        else:
+            decoded_bytes.append(cp - 0xE0100 + 16)   # byte 16-255
+
+    # Try to decode as UTF-8 text; fall back to latin-1 for raw bytes
+    raw = bytes(decoded_bytes)
+    try:
+        decoded_text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        decoded_text = raw.decode("latin-1")
+
+    # Filter to printable content (keep ASCII printable + common whitespace)
+    printable = []
+    for ch in decoded_text:
+        if ch in ("\n", "\r", "\t") or (0x20 <= ord(ch) <= 0x7E):
+            printable.append(ch)
+    return "".join(printable)
+
+
+def _strip_variation_selectors(text):
+    """Remove all variation selector characters from text.
+
+    Strips both ranges:
+    - VS1-VS16:   U+FE00 - U+FE0F   (Basic Multilingual Plane)
+    - VS17-VS256: U+E0100 - U+E01EF  (Supplementary)
+
+    Returns the cleaned text with all variation selectors removed.
+    """
+    return "".join(
+        ch for ch in text
+        if not (0xFE00 <= ord(ch) <= 0xFE0F or 0xE0100 <= ord(ch) <= 0xE01EF)
+    )
+
+
 def normalize_text(text):
     """Run all Layer 0 normalization steps in order.
 
@@ -522,6 +629,35 @@ def normalize_text(text):
     text, homoglyph_count = normalize_homoglyphs(text)
     if homoglyph_count > 0:
         flags.append("mixed_script_homoglyphs")
+
+    # Step 1.9: Unicode Tag Character steganography extraction (D5.2+)
+    # MUST run BEFORE Step 2 (invisible char stripping) because tag chars
+    # have Unicode category Cf and would be silently destroyed.
+    # The decoded payload is appended to the text so downstream layers
+    # (L1 rules, L2 obfuscation, ML) automatically scan the hidden message.
+    tag_stego_text = _extract_tag_stego(text)
+    if tag_stego_text:
+        flags.append("unicode_tag_stego")
+        # Append decoded payload so downstream layers can detect it.
+        # The visible text + hidden payload are separated by a newline.
+        text = text + "\n" + tag_stego_text
+
+    # Step 1.95: Variation Selector steganography extraction (D5.2+)
+    # MUST run BEFORE Step 2 (invisible char stripping) to capture the
+    # hidden payload.  VS chars are Unicode category Mn (Nonspacing Mark),
+    # which is NOT stripped by the Cf/Cc/Cn/Cs filter, but extracting
+    # early ensures no data loss regardless of future filter changes.
+    # The decoded payload is appended to the text so downstream layers
+    # (L1 rules, L2 obfuscation, ML) automatically scan the hidden message.
+    vs_stego_text = _extract_variation_selector_stego(text)
+    if vs_stego_text:
+        flags.append("variation_selector_stego")
+    # Always strip variation selectors from text (they are invisible noise)
+    text = _strip_variation_selectors(text)
+
+    # If VS stego decoded a hidden message, append it for downstream scanning
+    if vs_stego_text:
+        text = text + "\n" + vs_stego_text
 
     # Step 2: Invisible character stripping
     if has_invisible_chars(text):

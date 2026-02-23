@@ -31,6 +31,11 @@ from .timeout import (
     get_step_timeout,
     with_timeout,
 )
+from .resource_guard import (
+    ResourceLimitExceeded,
+    run_entry_guards,
+    check_expansion_ratio,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -376,6 +381,22 @@ def _layer0_sanitize_inner(raw_input):
         raw_input, encoding_used, enc_flags = decode_to_str(raw_input)
         all_flags.extend(enc_flags)
 
+    # Step 0e: Resource exhaustion guards — reject inputs that would
+    # blow memory, exceed depth limits, or violate rate limits.
+    # This runs BEFORE validation because validation only checks size;
+    # resource guards also check HTML depth and memory budget.
+    try:
+        run_entry_guards(raw_input)
+    except ResourceLimitExceeded as exc:
+        all_flags.append("resource_limit_{}".format(exc.guard_name))
+        return Layer0Result(
+            rejected=True,
+            rejection_reason="Resource limit exceeded: {}".format(exc.detail),
+            original_length=len(raw_input) if isinstance(raw_input, str) else 0,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
+
     # Step 1: Fail-fast validation
     rejection = validate_input(raw_input)
     if rejection is not None:
@@ -403,6 +424,38 @@ def _layer0_sanitize_inner(raw_input):
             source_metadata=source_metadata,
         )
     all_flags.extend(norm_flags)
+
+    # Step 2a: Expansion ratio guard — reject if normalization caused
+    # excessive expansion (zip-bomb style Unicode decomposition attacks).
+    try:
+        check_expansion_ratio(original_length, len(text))
+    except ResourceLimitExceeded as exc:
+        all_flags.append("resource_limit_expansion_ratio")
+        return Layer0Result(
+            rejected=True,
+            rejection_reason="Resource limit exceeded: {}".format(exc.detail),
+            original_length=original_length,
+            anomaly_flags=all_flags,
+            source_metadata=source_metadata,
+        )
+
+    # Step 2b: Store decoded tag steganography text in source_metadata
+    # for audit trail.  The decoded payload is already appended to `text`
+    # by normalize_text() so downstream layers scan it automatically.
+    if "unicode_tag_stego" in norm_flags:
+        from .normalization import _extract_tag_stego
+        tag_decoded = _extract_tag_stego(raw_input)
+        if tag_decoded:
+            source_metadata["tag_stego_decoded"] = tag_decoded
+
+    # Step 2c: Store decoded variation selector steganography text in
+    # source_metadata for audit trail.  The decoded payload is already
+    # appended to `text` by normalize_text() so downstream layers scan it.
+    if "variation_selector_stego" in norm_flags:
+        from .normalization import _extract_variation_selector_stego
+        vs_decoded = _extract_variation_selector_stego(raw_input)
+        if vs_decoded:
+            source_metadata["vs_stego_decoded"] = vs_decoded
 
     # Post-normalization empty check — all-invisible input passes validate_input()
     # but becomes empty after stripping. Reject it here.

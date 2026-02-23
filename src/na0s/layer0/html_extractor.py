@@ -2,6 +2,7 @@ import re
 from html.parser import HTMLParser
 
 from .content_type import sniff_binary
+from .resource_guard import check_html_depth, ResourceLimitExceeded
 
 # Quick check: does the string contain anything that looks like an HTML tag?
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z/!]")
@@ -149,6 +150,15 @@ def extract_safe_text(text):
     has_html_tags = bool(_HTML_TAG_RE.search(text))
 
     if not has_html_magic and not has_html_tags:
+        return text, flags
+
+    # Step 2b: HTML depth pre-check — reject deeply nested HTML before
+    # feeding it to the parser to prevent stack overflow / excessive
+    # recursion.  On violation, flag and return raw text (defense in depth).
+    try:
+        check_html_depth(text)
+    except ResourceLimitExceeded:
+        flags.append("html_depth_exceeded")
         return text, flags
 
     # Step 3: Parse HTML and extract visible text
