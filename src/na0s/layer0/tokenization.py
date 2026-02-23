@@ -1,12 +1,23 @@
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
 import threading
 import time
 
-import tiktoken
+# tiktoken is optional — if not installed, tokenization checks degrade
+# gracefully (return empty flags) rather than crashing all of Layer 0.
+try:
+    import tiktoken
+
+    _HAS_TIKTOKEN = True
+except ImportError:
+    tiktoken = None  # type: ignore[assignment]
+    _HAS_TIKTOKEN = False
+
+logger = logging.getLogger(__name__)
 
 _ENCODER = None
 _ENCODER_LOCK = threading.Lock()
@@ -20,8 +31,13 @@ def _get_encoder():
     time breaks the package in offline environments (Docker, CI,
     air-gapped servers).  Lazy loading defers the network call to
     first actual use and allows graceful fallback.
+
+    Returns ``None`` when tiktoken is not installed or the encoder
+    cannot be obtained (network error, etc.).
     """
     global _ENCODER
+    if not _HAS_TIKTOKEN:
+        return None
     if _ENCODER is not None:
         return _ENCODER
     with _ENCODER_LOCK:
@@ -30,6 +46,10 @@ def _get_encoder():
         try:
             _ENCODER = tiktoken.get_encoding("cl100k_base")
         except Exception:
+            logger.warning(
+                "tiktoken is installed but encoder could not be loaded; "
+                "tokenization checks will be skipped"
+            )
             return None
     return _ENCODER
 

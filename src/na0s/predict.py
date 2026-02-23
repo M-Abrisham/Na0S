@@ -606,11 +606,17 @@ def scan(text, vectorizer=None, model=None):
         "nfkc_changed": "D5",
         "invisible_chars_found": "D5.2",
         "unicode_whitespace_normalized": "D5.7",
+        "unicode_tag_stego": "D5.2",
+        "variation_selector_stego": "D5.2",
+        "mixed_script_homoglyphs": "D5.3",
+        "mojibake_repaired": "D5",
+        "ftfy_suspicious_correction": "D5",
         # html_extractor.py flags
         "hidden_html_content": "I2.1",
         "suspicious_html_comment": "I2.2",
         "magic_bytes_html": "I2",
         "html_parse_error": "I2",
+        "html_depth_exceeded": "A1",
         # content_type mismatch (declared vs detected)
         "content_type_mismatch": "M1.4",
         # content_type.py — category-level flags
@@ -690,6 +696,12 @@ def scan(text, vectorizer=None, model=None):
         # encoding.py flags
         "encoding_fallback_utf8": "D5",
         "coerced_to_str": "D5",
+        # encoding.py — BOM detection flags (exact match per encoding)
+        "bom_detected_utf-8-sig": "D4",
+        "bom_detected_utf-16-le": "D4",
+        "bom_detected_utf-16-be": "D4",
+        "bom_detected_utf-32-le": "D4",
+        "bom_detected_utf-32-be": "D4",
         # tokenization.py flags
         "known_malicious_exact": "D1",
         "known_malicious_normalized": "D1",
@@ -725,6 +737,11 @@ def scan(text, vectorizer=None, model=None):
         "pdf_javascript": "M1.4",
         "pdf_auto_action": "M1.4",
         "pdf_external_action": "E1",
+        # sanitizer.py — timeout flags (possible ReDoS / resource exhaustion)
+        "timeout_normalize": "A1.1",
+        "timeout_html": "A1.1",
+        "timeout_tokenize": "A1.1",
+        "timeout_pipeline": "A1.1",
     }
     for flag in list(l0.anomaly_flags) + hits:
         mapped = _L0_FLAG_MAP.get(flag)

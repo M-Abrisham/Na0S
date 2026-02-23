@@ -33,7 +33,6 @@ import os
 import re
 import signal
 import sys
-from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Optional, Union
 
 # ---------------------------------------------------------------------------
@@ -227,44 +226,6 @@ class _AlarmTimeout:
         signal.alarm(0)  # cancel pending alarm
         signal.signal(signal.SIGALRM, self._old_handler)
         return False
-
-
-def _regex_worker(args):
-    """Worker function for process-pool fallback.
-
-    Runs in a child process so the GIL does not block timeout.
-    """
-    pattern_str, pattern_flags, text, operation = args
-    compiled = re.compile(pattern_str, pattern_flags)
-    if operation == "search":
-        m = compiled.search(text)
-        if m is None:
-            return None
-        return m.group(), m.start(), m.end()
-    elif operation == "match":
-        m = compiled.match(text)
-        if m is None:
-            return None
-        return m.group(), m.start(), m.end()
-    elif operation == "findall":
-        return compiled.findall(text)
-    elif operation == "sub":
-        # args is (pattern_str, flags, text, "sub", repl)
-        # but we pack repl as part of text via a separator; cleaner to
-        # just do the sub here.  Caller wraps appropriately.
-        return None  # handled specially
-    return None
-
-
-# Lazy-init process pool (only created on Windows / non-SIGALRM platforms)
-_PROCESS_POOL = None
-
-
-def _get_process_pool():
-    global _PROCESS_POOL
-    if _PROCESS_POOL is None:
-        _PROCESS_POOL = ProcessPoolExecutor(max_workers=2)
-    return _PROCESS_POOL
 
 
 def _run_with_timeout(fn, timeout_ms: int):

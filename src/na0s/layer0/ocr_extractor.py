@@ -470,7 +470,7 @@ def _tesseract_confidence(img, lang: str) -> float:
         if confs:
             return round(sum(confs) / len(confs) / 100.0, 4)
     except Exception:
-        pass
+        logger.debug("Tesseract confidence calculation failed", exc_info=True)
     return 0.0
 
 
