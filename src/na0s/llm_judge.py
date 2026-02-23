@@ -24,12 +24,14 @@ try:
     from openai import OpenAI
     HAS_OPENAI = True
 except ImportError:
+    OpenAI = None
     HAS_OPENAI = False
 
 try:
     from groq import Groq
     HAS_GROQ = True
 except ImportError:
+    Groq = None
     HAS_GROQ = False
 
 

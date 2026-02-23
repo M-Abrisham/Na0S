@@ -996,7 +996,7 @@ class TestEdgeCases(unittest.TestCase):
                 raise RegexTimeoutError("simulated timeout")
             return original_safe_search(pattern, text, timeout_ms=timeout_ms)
 
-        with patch('na0s.rules.safe_search', side_effect=mock_safe_search):
+        with patch('na0s.layer1.analyzer.safe_search', side_effect=mock_safe_search):
             hits = rule_score("some benign text")
             # The first rule should be treated as a match due to timeout
             self.assertTrue(len(hits) >= 1,
