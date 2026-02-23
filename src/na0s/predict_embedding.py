@@ -227,8 +227,15 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None,
     # Step 3 -- Obfuscation scan
     # ------------------------------------------------------------------
     obs = obfuscation_scan(clean)
-    if obs["evasion_flags"]:
-        hits.extend(obs["evasion_flags"])
+    obs_flags = obs["evasion_flags"] if obs["evasion_flags"] else []
+
+    # BUG-L2-03 FIX (P0-3): Do NOT extend `hits` with obs_flags before
+    # the decision logic.  Previously, obs flags were added to `hits` here,
+    # which caused the `if label == "SAFE" and hits:` check to flip benign
+    # inputs to MALICIOUS when ML confidence < 0.7 -- even with ZERO rule
+    # matches.  Obfuscation flags alone should NOT trigger the flip.
+    # Now we only add obs flags to `hits` AFTER the decision is made,
+    # matching the pattern used in predict.py (BUG-L2-03 fix).
 
     # Classify decoded views through the embedding model as well
     # BUG-L5-4 FIX: Only flip label if decoded-view ML confidence exceeds
@@ -270,6 +277,12 @@ def classify_prompt_embedding(text, embedding_model=None, classifier=None,
             # ML is unsure and rules say something is fishy -- flip
             label = "MALICIOUS"
         # else: ML is confident it is safe; rules noted but not overriding
+
+    # Now add obfuscation flags to hits for downstream consumers
+    # (technique_tags mapping, ScanResult.rule_hits, etc.)
+    # This is AFTER the decision logic so obs flags alone can't trigger the flip.
+    if obs_flags:
+        hits.extend(obs_flags)
 
     # Use P(malicious) as the reported probability
     confidence = p_malicious

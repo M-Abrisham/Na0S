@@ -7,6 +7,7 @@ is uncertain, keeping costs at ~$1-10/month per 100k inputs.
 """
 
 import json
+import math
 import os
 import re
 import secrets
@@ -427,7 +428,10 @@ class LLMJudge:
             verdict = str(data.get("verdict", "UNKNOWN")).upper().strip()
             if verdict not in ("SAFE", "MALICIOUS"):
                 verdict = "UNKNOWN"
-            confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
+            raw_conf = float(data.get("confidence", 0.5))
+            if math.isnan(raw_conf) or math.isinf(raw_conf):
+                raw_conf = 0.5
+            confidence = max(0.0, min(1.0, raw_conf))
             reasoning = _CONTROL_RE.sub("", str(data.get("reasoning", ""))).strip()[:500]
             return JudgeVerdict(
                 verdict=verdict,

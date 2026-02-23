@@ -367,6 +367,12 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
         boost = _AGREEMENT_BOOST.get(signal_layers, 0.15)
         composite = min(composite + boost, 1.0)
 
+    # Clamp composite to [0, 1] — the raw sum of ml_weight + rule_weight +
+    # obf_weight + structural_weight can exceed 1.0 when multiple high/critical
+    # rules fire simultaneously.  Downstream consumers (ScanResult.risk_score,
+    # cascade confidence) expect a normalised probability in [0, 1].
+    composite = min(max(composite, 0.0), 1.0)
+
     if composite >= DECISION_THRESHOLD:
         return "MALICIOUS", composite
     return "SAFE", composite

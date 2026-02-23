@@ -253,8 +253,10 @@ class WeightedClassifier:
         for hit in detailed_hits:
             w = SEVERITY_WEIGHTS.get(hit.severity, 0.1)
             rule_weight += w
-            # Track the highest severity for override protection
-            if hit.severity == "critical":
+            # Track the highest severity for override protection.
+            # critical_content is even more specific than critical (near-zero
+            # FP rate) so it must also prevent ML-trust overrides.
+            if hit.severity in ("critical", "critical_content"):
                 max_severity = "critical"
             elif hit.severity == "high" and max_severity != "critical":
                 max_severity = "high"

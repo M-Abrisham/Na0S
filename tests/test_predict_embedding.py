@@ -16,6 +16,7 @@ Test categories:
   4. predict_embedding() -- Layer0 blocking (3)
   5. classify_prompt_embedding() -- basic paths (5)
   6. classify_prompt_embedding() -- weighted decision logic (6)
+  6b. BUG-L2-03 / P0-3: obs flags must NOT trigger flip (5)
   7. classify_prompt_embedding() -- obfuscation decoded views (4)
   8. classify_prompt_embedding() -- Layer0 blocking (3)
   9. Edge cases (5)
@@ -540,6 +541,172 @@ class TestWeightedDecisionLogic(unittest.TestCase):
         self.assertAlmostEqual(confidence, 0.8)
         self.assertIn("instruction_override", hits)
         self.assertIn("role_play_jailbreak", hits)
+
+
+# ============================================================================
+# 6b. BUG-L2-03 / P0-3: Obfuscation flags must NOT trigger SAFE->MALICIOUS flip
+# ============================================================================
+
+class TestObfuscationFlagsDoNotTriggerFlip(unittest.TestCase):
+    """BUG-L2-03 / P0-3: Obfuscation flags (base64, high_entropy,
+    punctuation_flood) are informational signals.  They should appear
+    in the returned ``hits`` list but must NOT cause the SAFE->MALICIOUS
+    flip on their own when ML confidence < 0.7 and there are ZERO rule
+    matches.
+
+    The fix separates obs flags from rule hits in the decision logic,
+    matching the pattern already applied in predict.py (BUG-L2-03).
+    """
+
+    @patch("na0s.predict_embedding.obfuscation_scan")
+    @patch("na0s.predict_embedding.rule_score")
+    @patch("na0s.predict_embedding.layer0_sanitize")
+    def test_obs_flags_only_no_rules_low_confidence_stays_safe(
+        self, mock_l0, mock_rules, mock_obs,
+    ):
+        """ML SAFE + low confidence + obs flags only (no rules) -> SAFE.
+
+        This is the core P0-3 regression test.  Before the fix, the obs
+        flags were added to ``hits`` before the decision logic, making
+        ``hits`` truthy and causing the SAFE->MALICIOUS flip.
+        """
+        mock_l0.return_value = _make_l0_result("benign text with encoding")
+        mock_rules.return_value = []  # zero rule matches
+        mock_obs.return_value = {
+            "evasion_flags": ["high_entropy", "base64"],
+            "decoded_views": [],
+        }
+        emb_model = _make_embedding_model()
+        # p_safe = 0.55 <= 0.7 threshold -- would flip if obs flags counted
+        clf = _make_classifier(prediction=0, proba_safe=0.55, proba_mal=0.45)
+
+        label, confidence, hits, l0 = classify_prompt_embedding(
+            "benign text with encoding", emb_model, clf,
+        )
+
+        # Must stay SAFE because there are no actual rule hits
+        self.assertEqual(label, "SAFE")
+        # Obs flags should still appear in the returned hits for downstream use
+        self.assertIn("high_entropy", hits)
+        self.assertIn("base64", hits)
+
+    @patch("na0s.predict_embedding.obfuscation_scan")
+    @patch("na0s.predict_embedding.rule_score")
+    @patch("na0s.predict_embedding.layer0_sanitize")
+    def test_obs_flags_with_rules_low_confidence_flips_malicious(
+        self, mock_l0, mock_rules, mock_obs,
+    ):
+        """ML SAFE + low confidence + rule hits + obs flags -> MALICIOUS.
+
+        When there ARE actual rule matches, the flip should still happen.
+        Obs flags are additive context, not the sole trigger.
+        """
+        mock_l0.return_value = _make_l0_result("obfuscated attack payload")
+        mock_rules.return_value = ["instruction_override"]  # real rule hit
+        mock_obs.return_value = {
+            "evasion_flags": ["base64"],
+            "decoded_views": [],
+        }
+        emb_model = _make_embedding_model()
+        # p_safe = 0.55 <= 0.7 threshold -- rule hit should trigger flip
+        clf = _make_classifier(prediction=0, proba_safe=0.55, proba_mal=0.45)
+
+        label, confidence, hits, l0 = classify_prompt_embedding(
+            "obfuscated attack payload", emb_model, clf,
+        )
+
+        # Must flip to MALICIOUS because of the rule hit
+        self.assertEqual(label, "MALICIOUS")
+        # Both rule hits and obs flags should be in the returned hits
+        self.assertIn("instruction_override", hits)
+        self.assertIn("base64", hits)
+
+    @patch("na0s.predict_embedding.obfuscation_scan")
+    @patch("na0s.predict_embedding.rule_score")
+    @patch("na0s.predict_embedding.layer0_sanitize")
+    def test_obs_flags_only_high_confidence_stays_safe(
+        self, mock_l0, mock_rules, mock_obs,
+    ):
+        """ML SAFE + high confidence + obs flags only -> SAFE.
+
+        Even with obs flags, high-confidence SAFE should never flip.
+        This worked before the fix too, but validates the full path.
+        """
+        mock_l0.return_value = _make_l0_result("safe text with unusual chars")
+        mock_rules.return_value = []
+        mock_obs.return_value = {
+            "evasion_flags": ["punctuation_flood"],
+            "decoded_views": [],
+        }
+        emb_model = _make_embedding_model()
+        # p_safe = 0.85 > 0.7 threshold
+        clf = _make_classifier(prediction=0, proba_safe=0.85, proba_mal=0.15)
+
+        label, confidence, hits, l0 = classify_prompt_embedding(
+            "safe text with unusual chars", emb_model, clf,
+        )
+
+        self.assertEqual(label, "SAFE")
+        self.assertIn("punctuation_flood", hits)
+
+    @patch("na0s.predict_embedding.obfuscation_scan")
+    @patch("na0s.predict_embedding.rule_score")
+    @patch("na0s.predict_embedding.layer0_sanitize")
+    def test_ml_malicious_with_obs_flags_stays_malicious(
+        self, mock_l0, mock_rules, mock_obs,
+    ):
+        """ML MALICIOUS + obs flags -> stays MALICIOUS.
+
+        When ML already says malicious, obs flags are just extra context.
+        """
+        mock_l0.return_value = _make_l0_result("definitely malicious")
+        mock_rules.return_value = []
+        mock_obs.return_value = {
+            "evasion_flags": ["high_entropy", "base64"],
+            "decoded_views": [],
+        }
+        emb_model = _make_embedding_model()
+        clf = _make_classifier(prediction=1, proba_safe=0.1, proba_mal=0.9)
+
+        label, confidence, hits, l0 = classify_prompt_embedding(
+            "definitely malicious", emb_model, clf,
+        )
+
+        self.assertEqual(label, "MALICIOUS")
+        self.assertIn("high_entropy", hits)
+        self.assertIn("base64", hits)
+
+    @patch("na0s.predict_embedding.obfuscation_scan")
+    @patch("na0s.predict_embedding.rule_score")
+    @patch("na0s.predict_embedding.layer0_sanitize")
+    def test_multiple_obs_flags_no_rules_stays_safe(
+        self, mock_l0, mock_rules, mock_obs,
+    ):
+        """Multiple obs flags with no rules should NOT flip.
+
+        Even a large number of obs flags should not be enough on their own
+        to trigger the flip -- only actual rule hits count.
+        """
+        mock_l0.return_value = _make_l0_result("text with many flags")
+        mock_rules.return_value = []
+        mock_obs.return_value = {
+            "evasion_flags": ["high_entropy", "base64", "punctuation_flood"],
+            "decoded_views": [],
+        }
+        emb_model = _make_embedding_model()
+        # p_safe = 0.50 <= threshold -- would definitely flip if obs flags counted
+        clf = _make_classifier(prediction=0, proba_safe=0.50, proba_mal=0.50)
+
+        label, confidence, hits, l0 = classify_prompt_embedding(
+            "text with many flags", emb_model, clf,
+        )
+
+        self.assertEqual(label, "SAFE")
+        # All obs flags still in the returned hits
+        self.assertEqual(len(hits), 3)
+        self.assertIn("high_entropy", hits)
+        self.assertIn("base64", hits)
+        self.assertIn("punctuation_flood", hits)
 
 
 # ============================================================================

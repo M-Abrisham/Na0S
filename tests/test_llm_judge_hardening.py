@@ -1164,6 +1164,111 @@ class TestCircuitBreakerConsistency(unittest.TestCase):
 
 
 # ============================================================================
+# 16. NaN/Inf confidence guard in llm_judge._parse_response (P0-2 fix)
+# ============================================================================
+
+class TestJudgeConfidenceNanInfGuard(unittest.TestCase):
+    """Verify NaN, Inf, -Inf in confidence are caught in llm_judge._parse_response.
+
+    Bug P0-2: max(0.0, min(1.0, float("NaN"))) returns 1.0 in CPython because
+    min(1.0, NaN) returns 1.0 due to NaN comparison semantics. A hijacked LLM
+    returning "confidence": "NaN" gets maximum confidence, which is a security
+    vulnerability.
+    """
+
+    def setUp(self):
+        self.judge = _make_judge(use_few_shot=False)
+
+    def test_nan_defaults_to_half(self):
+        """NaN confidence -> 0.5 (not 1.0 as in the buggy code)."""
+        content = json.dumps({
+            "verdict": "MALICIOUS", "confidence": "NaN",
+            "reasoning": "hijack attempt",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 0.5)
+        self.assertNotEqual(result.confidence, 1.0)
+
+    def test_inf_defaults_to_half(self):
+        """Infinity confidence -> 0.5."""
+        content = json.dumps({
+            "verdict": "MALICIOUS", "confidence": "Infinity",
+            "reasoning": "test",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 0.5)
+
+    def test_negative_inf_defaults_to_half(self):
+        """-Infinity confidence -> 0.5."""
+        content = json.dumps({
+            "verdict": "MALICIOUS", "confidence": "-Infinity",
+            "reasoning": "test",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 0.5)
+
+    def test_extreme_high_clamped(self):
+        """confidence 999.0 -> clamped to 1.0."""
+        content = json.dumps({
+            "verdict": "MALICIOUS", "confidence": 999.0,
+            "reasoning": "test",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 1.0)
+
+    def test_extreme_low_clamped(self):
+        """confidence -5.0 -> clamped to 0.0."""
+        content = json.dumps({
+            "verdict": "SAFE", "confidence": -5.0,
+            "reasoning": "test",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 0.0)
+
+    def test_normal_confidence_preserved(self):
+        """Normal confidence 0.85 passes through unchanged."""
+        content = json.dumps({
+            "verdict": "MALICIOUS", "confidence": 0.85,
+            "reasoning": "injection detected",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 0.85)
+
+    def test_boundary_zero(self):
+        """Confidence exactly 0.0 is preserved."""
+        content = json.dumps({
+            "verdict": "SAFE", "confidence": 0.0,
+            "reasoning": "totally safe",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 0.0)
+
+    def test_boundary_one(self):
+        """Confidence exactly 1.0 is preserved."""
+        content = json.dumps({
+            "verdict": "MALICIOUS", "confidence": 1.0,
+            "reasoning": "definitely malicious",
+        })
+        result = self.judge._parse_response(content, 100.0)
+        self.assertEqual(result.confidence, 1.0)
+
+    def test_nan_in_classify_returns_half_not_max(self):
+        """End-to-end: classify() with NaN in response -> confidence 0.5."""
+        nonce = "testnoncevalue99"
+        with patch("na0s.llm_judge.secrets.token_hex", return_value=nonce):
+            content = json.dumps({
+                "verdict": "MALICIOUS", "confidence": "NaN",
+                "reasoning": "hijack", "nonce": nonce,
+            })
+            self.judge._client.chat.completions.create.return_value = (
+                _mock_response(content)
+            )
+            verdict = self.judge.classify("test input")
+        self.assertEqual(verdict.verdict, "MALICIOUS")
+        self.assertEqual(verdict.confidence, 0.5)
+
+
+# ============================================================================
 # Entry point
 # ============================================================================
 
