@@ -53,12 +53,74 @@ def _get_encoder():
             return None
     return _ENCODER
 
+# ---------------------------------------------------------------------------
+# Configurable thresholds (named constants, env-overridable)
+# ---------------------------------------------------------------------------
+
+def _safe_float_env(name, default, lo=0.0, hi=1.0):
+    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
+    import math
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return default
+    if not math.isfinite(val):
+        return default
+    if val < lo or val > hi:
+        return default
+    return val
+
+
+def _safe_int_env(name, default, lo=0, hi=None):
+    """Read an int from env, clamping to [lo, hi]. Falls back to *default*."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        return default
+    if val < lo:
+        return default
+    if hi is not None and val > hi:
+        return default
+    return val
+
+
 # --- Ratio thresholds ---
 # Start permissive — tighten based on real attacks, not guesses.
 # Normal English: ~0.25-0.35 | CJK/emoji: ~0.50-0.60 | Adversarial: ~0.80+
-GLOBAL_RATIO_THRESHOLD = 0.75
-WINDOW_SIZE = 50
-WINDOW_RATIO_THRESHOLD = 0.85
+# Override: L0_GLOBAL_RATIO_THRESHOLD (float, 0-1)
+GLOBAL_RATIO_THRESHOLD = _safe_float_env(
+    "L0_GLOBAL_RATIO_THRESHOLD", 0.75, lo=0.0, hi=1.0
+)
+
+# Sliding-window size (in characters) for localized anomaly detection.
+# Override: L0_WINDOW_SIZE (int, >= 10)
+WINDOW_SIZE = _safe_int_env("L0_WINDOW_SIZE", 50, lo=10)
+
+# Per-window ratio threshold for flagging localized adversarial suffixes.
+# Override: L0_WINDOW_RATIO_THRESHOLD (float, 0-1)
+WINDOW_RATIO_THRESHOLD = _safe_float_env(
+    "L0_WINDOW_RATIO_THRESHOLD", 0.85, lo=0.0, hi=1.0
+)
+
+# Fraction of characters that must be CJK/emoji for the text to be
+# considered "high-token-script" (and exempt from tokenization_spike).
+# Default 0.3 (30%).  Override: L0_CJK_FRACTION_THRESHOLD
+_CJK_FRACTION_THRESHOLD = _safe_float_env(
+    "L0_CJK_FRACTION_THRESHOLD", 0.3, lo=0.0, hi=1.0
+)
+
+# Minimum text length (in characters) for tokenization analysis.
+# Texts shorter than this are skipped (too little signal).
+# Default 10.  Override: L0_MIN_TEXT_LENGTH_FOR_TOKENIZATION
+_MIN_TEXT_LENGTH_FOR_TOKENIZATION = _safe_int_env(
+    "L0_MIN_TEXT_LENGTH_FOR_TOKENIZATION", 10, lo=1
+)
 
 # CJK/emoji Unicode ranges — these scripts naturally have high token ratios
 _CJK_RANGES = (
@@ -82,7 +144,7 @@ def _is_high_token_script(text):
             if lo <= cp <= hi:
                 high_count += 1
                 break
-    return high_count / len(text) > 0.3
+    return high_count / len(text) > _CJK_FRACTION_THRESHOLD
 
 # Strip everything except lowercase alphanumeric + spaces for normalized hash
 _NORMALIZE_RE = re.compile(r"[^a-z0-9 ]")
@@ -374,7 +436,7 @@ def check_tokenization_anomaly(text):
     """
     flags = []
 
-    if len(text) < 10:
+    if len(text) < _MIN_TEXT_LENGTH_FOR_TOKENIZATION:
         return flags, 0.0, {}
 
     fp = _compute_fingerprint(text)

@@ -26,7 +26,7 @@ L16 Multi-Turn | L17 Doc Scanning | L18 RAG Security | L19 Agent/MCP | L20 Taxon
 
 **Files**: `src/layer0/` (14 files: `__init__.py`, `result.py`, `sanitizer.py`, `validation.py`, `normalization.py`, `encoding.py`, `html_extractor.py`, `tokenization.py`, `input_loader.py`, `mime_parser.py`, `safe_regex.py`, `content_type.py`, `ocr_extractor.py`, `doc_extractor.py`)
 **Tests**: `tests/test_layer0_size_gate.py` (23 tests), `tests/test_unicode_bypass.py` (45 tests), `tests/test_layer0_hypothesis.py` (40 property-based tests), `tests/test_input_loader.py` (48 tests), `tests/test_open_redirect.py` (9 tests), `tests/test_mime_parser.py` (24 tests), `tests/test_safe_regex.py` (33 tests), `tests/test_content_type.py` (107 tests), `tests/test_ocr_extractor.py` (27 tests), `tests/test_doc_extractor.py` (32 tests), `tests/test_pdf_javascript.py` (24 tests)
-**Status**: ~99% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added, file/URL input loading and MIME parsing added, ReDoS protection added, comprehensive magic-byte content-type detection added, OCR image extraction and document parsing (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback added (2026-02-14). Security hardening: SSRF, Open Redirect, and TOCTOU (CWE-367) fixes applied to input_loader.py (2026-02-15). Content-type fixes: shebang false-positive narrowed (#!→#!/), Java/Mach-O disambiguation, BMP/ICO secondary validation, 48 embedded_* flags mapped in predict.py (2026-02-15). Unicode Tag Character stego extraction + Variation Selector stego detection added (2026-02-22) — Na0S is the ONLY open-source tool that extracts+scans hidden messages from invisible chars. Resource exhaustion protection integrated (2026-02-22). Hardening pass (2026-02-22): 15 unmapped L0 flags wired into `_L0_FLAG_MAP` (stego, homoglyphs, BOM, timeouts), tiktoken import guarded with `_HAS_TIKTOKEN` for graceful degradation, 38 lines dead code removed from safe_regex.py, debug logging added to 3 silent exception handlers. 720+ tests passing.
+**Status**: ~99% complete — all 9 bugs fixed, wired into cascade.py and predict_embedding.py, property-based fuzz testing added, file/URL input loading and MIME parsing added, ReDoS protection added, comprehensive magic-byte content-type detection added, OCR image extraction and document parsing (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback added (2026-02-14). Security hardening: SSRF, Open Redirect, and TOCTOU (CWE-367) fixes applied to input_loader.py (2026-02-15). Content-type fixes: shebang false-positive narrowed (#!→#!/), Java/Mach-O disambiguation, BMP/ICO secondary validation, 48 embedded_* flags mapped in predict.py (2026-02-15). Unicode Tag Character stego extraction + Variation Selector stego detection added (2026-02-22) — Na0S is the ONLY open-source tool that extracts+scans hidden messages from invisible chars. Resource exhaustion protection integrated (2026-02-22). Hardening pass (2026-02-22): 15 unmapped L0 flags wired into `_L0_FLAG_MAP` (stego, homoglyphs, BOM, timeouts), tiktoken import guarded with `_HAS_TIKTOKEN` for graceful degradation, 38 lines dead code removed from safe_regex.py, debug logging added to 3 silent exception handlers. Config externalization (2026-02-22): all 8 hardcoded thresholds externalized to named constants + `L0_*` env vars with `math.isfinite()` NaN/Inf guard, all test gaps closed (encoding.py 46 tests, html_extractor.py 73 tests, tokenization.py 60 tests incl. concurrent FingerprintStore stress). **Layer 0 is 100% complete.** 940+ tests passing.
 
 ### Updated Description
 Layer 0 is the mandatory first gate for all input. It validates type/size, normalizes Unicode (NFKC), strips invisible characters, canonicalizes whitespace, extracts safe text from HTML, detects tokenization anomalies via tiktoken, extracts text from images via OCR (EasyOCR/Tesseract), and parses documents (PDF/DOCX/RTF/XLSX/PPTX) with graceful fallback when optional dependencies are missing. Every downstream layer receives sanitized input. Integrated into `predict.py`, `cascade.py`, and `predict_embedding.py` as of 2026-02-14.
@@ -109,23 +109,26 @@ Layer 0 is the mandatory first gate for all input. It validates type/size, norma
 - [x] **CI/CD pipeline** — DONE (2026-02-14): GitHub Actions CI with Python 3.9-3.12 matrix, flake8 linting, coverage reporting, PR checks, smoke tests (13 tests). **Priority**: P0.
 - [x] **Resource exhaustion protection** — Integrated orphaned `resource_guard.py` into pipeline. Now enforced: input size (50K chars/200KB), HTML depth (100), expansion ratio (10x), memory budget (50MB), rate limiting (100 req/60s). Added HTML depth pre-check in `html_extractor.py`. Added `MAX_CHUNKS=20` in predict.py to cap ML inference passes. All limits env-configurable. 38 tests (26 resource + 12 chunks). ✅ DONE (2026-02-22)
 
-### Hardcoded Values to Externalize
-| Value | File | Current | Recommendation |
-|-------|------|---------|----------------|
-| NFKC changed threshold | normalization.py:69 | 0.25 (25%) | Named constant or env var |
-| Invisible chars threshold | normalization.py:79 | >2 | Named constant |
-| `GLOBAL_RATIO_THRESHOLD` | tokenization.py:15 | 0.75 | Env-configurable |
-| `WINDOW_RATIO_THRESHOLD` | tokenization.py:17 | 0.85 | Env-configurable |
-| CJK fraction threshold | tokenization.py:41 | 0.3 | Named constant |
-| Short text skip | tokenization.py:308 | <10 chars | Named constant |
-| `_MIN_CONFIDENCE` | encoding.py:13 | 0.5 | Env-configurable |
+### ~~Hardcoded Values to Externalize~~ ✅ ALL DONE (2026-02-22)
+All 8 values externalized into named constants with `L0_*` env var overrides. Safe parsing with `math.isfinite()` NaN/Inf guard + range validation. 42 tests in `test_l0_config.py`.
 
-### Test Gaps
-- `encoding.py` — zero dedicated test coverage (bytes path now exercised by Hypothesis fuzzing)
-- `html_extractor.py` — only 2 tests (in unicode_bypass), needs dedicated test file
-- `tokenization.py` — zero dedicated test coverage (FingerprintStore, anomaly detection, CJK exemption); fingerprint invariants now tested by Hypothesis
+| Value | Env Var | Default | Status |
+|-------|---------|---------|--------|
+| ~~NFKC changed threshold~~ | `L0_NFKC_CHANGE_THRESHOLD` | 0.25 | ✅ DONE |
+| ~~Invisible chars threshold~~ | `L0_INVISIBLE_CHARS_THRESHOLD` | 2 | ✅ DONE |
+| ~~`GLOBAL_RATIO_THRESHOLD`~~ | `L0_GLOBAL_RATIO_THRESHOLD` | 0.75 | ✅ DONE |
+| ~~`WINDOW_RATIO_THRESHOLD`~~ | `L0_WINDOW_RATIO_THRESHOLD` | 0.85 | ✅ DONE |
+| ~~CJK fraction threshold~~ | `L0_CJK_FRACTION_THRESHOLD` | 0.3 | ✅ DONE |
+| ~~Short text skip~~ | `L0_MIN_TEXT_LENGTH_FOR_TOKENIZATION` | 10 | ✅ DONE |
+| ~~`_MIN_CONFIDENCE`~~ | `L0_MIN_ENCODING_CONFIDENCE` | 0.5 | ✅ DONE |
+| ~~Window size~~ | `L0_WINDOW_SIZE` | 50 | ✅ DONE |
+
+### ~~Test Gaps~~ ✅ ALL DONE (2026-02-22)
+- ~~`encoding.py` — zero dedicated test coverage~~ ✅ DONE — 46 tests in `test_encoding.py` (BOM detection, chardet fallback, low confidence, decode chain, anomaly flags, edge cases)
+- ~~`html_extractor.py` — only 2 tests~~ ✅ DONE — 73 tests in `test_html_extractor.py` (tag stripping, hidden content, script/style, comments, BOM, malformed HTML, depth limit, void elements, anomaly flags)
+- ~~`tokenization.py` — zero dedicated test coverage~~ ✅ DONE — 60 tests in `test_tokenization.py` (fingerprint computation, anomaly detection, CJK exemption, FingerprintStore CRUD, LRU eviction, TTL, WAL mode, edge cases)
 - ~~Bytes-input pipeline path — untested~~ COVERED by `test_layer0_hypothesis.py` (TestBytesInputPath, TestNeverCrash)
-- Concurrent FingerprintStore access — untested
+- ~~Concurrent FingerprintStore access — untested~~ ✅ DONE — 4 concurrent stress tests in `test_tokenization.py` (10+ threads, file-based WAL SQLite, mixed read/write, 100-operation stress test)
 
 ### Implementation Plan
 **Phase 1 (P0 — Critical fixes)**: ~~Fix BUG-1 through BUG-9, wire L0 into cascade.py and predict_embedding.py, complete `_L0_FLAG_MAP`~~ ✅ DONE (2026-02-14)

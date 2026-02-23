@@ -1,3 +1,5 @@
+import math
+import os
 import re
 import unicodedata
 
@@ -29,6 +31,58 @@ _EXCESSIVE_TABS_RE = re.compile(r"\t{3,}")
 # token for reconstruction.  We use re.split with a capturing group so that
 # delimiters (whitespace runs) are preserved for lossless reassembly.
 _TOKEN_SPLIT_RE = re.compile(r"(\s+)")
+
+# ---------------------------------------------------------------------------
+# Configurable thresholds (named constants, env-overridable)
+# ---------------------------------------------------------------------------
+
+def _safe_float_env(name, default, lo=0.0, hi=1.0):
+    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return default
+    if not math.isfinite(val):
+        return default
+    if val < lo or val > hi:
+        return default
+    return val
+
+
+def _safe_int_env(name, default, lo=0, hi=None):
+    """Read an int from env, clamping to [lo, hi]. Falls back to *default*."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        return default
+    if val < lo:
+        return default
+    if hi is not None and val > hi:
+        return default
+    return val
+
+
+# Fraction of original characters that must be compatibility-form (NFKC-
+# decomposable) before the ``nfkc_changed`` flag is raised.  Low values
+# fire on normal smart quotes / superscripts; high values miss evasion.
+# Default 0.25 (25%).  Override: L0_NFKC_CHANGE_THRESHOLD
+_NFKC_CHANGE_THRESHOLD = _safe_float_env(
+    "L0_NFKC_CHANGE_THRESHOLD", 0.25, lo=0.0, hi=1.0
+)
+
+# Minimum number of invisible / control characters required before the
+# ``invisible_chars_found`` flag is raised.  A single zero-width space
+# from copy-paste is normal; a cluster indicates evasion.
+# Default 2 (flag when count > 2, i.e. >= 3).  Override: L0_INVISIBLE_CHARS_THRESHOLD
+_INVISIBLE_CHARS_THRESHOLD = _safe_int_env(
+    "L0_INVISIBLE_CHARS_THRESHOLD", 2, lo=0
+)
 
 
 # ---------------------------------------------------------------------------
@@ -614,10 +668,11 @@ def normalize_text(text):
     # Collapses fullwidth chars, ligatures, superscripts, compatibility forms
     compat_count = _count_compat_chars(text)
     text = unicodedata.normalize("NFKC", text)
-    # Only flag if >25% of original chars are compatibility forms — ligatures
-    # from Word, superscripts in math (x²), smart quotes are all normal.
-    # A wall of fullwidth chars (evasion) typically hits 80%+.
-    if compat_count > 0 and compat_count / max(original_len, 1) > 0.25:
+    # Only flag if more than _NFKC_CHANGE_THRESHOLD of original chars are
+    # compatibility forms — ligatures from Word, superscripts in math (x²),
+    # smart quotes are all normal.  A wall of fullwidth chars (evasion)
+    # typically hits 80%+.
+    if compat_count > 0 and compat_count / max(original_len, 1) > _NFKC_CHANGE_THRESHOLD:
         flags.append("nfkc_changed")
 
     # Step 1.5: Cross-script homoglyph normalization (D5.3)
@@ -666,9 +721,10 @@ def normalize_text(text):
         # spaces at word boundaries, offsetting the count.
         invisible_count = _count_invisible_chars(text)
         text = strip_invisible_chars(text)
-        # Only flag if >2 invisible chars — a single zero-width space from
-        # copy-paste is normal; a cluster of them is evasion
-        if invisible_count > 2:
+        # Only flag if more than _INVISIBLE_CHARS_THRESHOLD invisible chars
+        # — a single zero-width space from copy-paste is normal; a cluster
+        # of them is evasion
+        if invisible_count > _INVISIBLE_CHARS_THRESHOLD:
             flags.append("invisible_chars_found")
 
     # Step 3: Whitespace canonicalization
