@@ -1092,12 +1092,12 @@ Layer 13 manages the data lifecycle from external source sync through training d
 ## Layer 14: Red-Team Harness & CI/CD
 
 **Files**: `scripts/evaluate_probes.py` (231 lines), `scripts/evaluate_llm_judge.py` (179 lines)
-**Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt` (no pre-commit hooks, no Makefile, no pyproject.toml)
+**Infrastructure**: GitHub Actions CI (`ci.yml`, `pr-check.yml`), `requirements-dev.txt`, `pyproject.toml` (console script entry point, optional extras), `MANIFEST.in`, CLI (`na0s` command) (no pre-commit hooks, no Makefile)
 **Tests**: `python -m unittest discover tests/` (automated via GitHub Actions), `tests/test_ci_smoke.py` (13 smoke tests)
 **Status**: CI/CD pipeline **implemented** (2026-02-14) — evaluation scripts + GitHub Actions CI
 
 ### Updated Description
-Layer 14 covers testing infrastructure and automation. Two evaluation scripts exist: `evaluate_probes.py` runs all 19 probes through the detector with per-probe recall and taxonomy grouping (OWASP/AVID/LMRC), and `evaluate_llm_judge.py` evaluates the LLM judge with TP/FP/TN/FN and latency stats. **GitHub Actions CI pipeline was added 2026-02-14** (`ci.yml` with Python 3.9-3.12 matrix, flake8 linting, coverage; `pr-check.yml` with syntax checks, test summary). No pre-commit hooks, no Makefile, no tox.ini, no pyproject.toml yet. The project is not packaged (no PyPI). No fuzzing, no adversarial generation against the live detector, no regression tracking.
+Layer 14 covers testing infrastructure and automation. Two evaluation scripts exist: `evaluate_probes.py` runs all 19 probes through the detector with per-probe recall and taxonomy grouping (OWASP/AVID/LMRC), and `evaluate_llm_judge.py` evaluates the LLM judge with TP/FP/TN/FN and latency stats. **GitHub Actions CI pipeline was added 2026-02-14** (`ci.yml` with Python 3.9-3.12 matrix, flake8 linting, coverage; `pr-check.yml` with syntax checks, test summary). No pre-commit hooks, no Makefile, no tox.ini yet. **Packaging completed 2026-02-24**: `pyproject.toml` with console script, `MANIFEST.in`, CLI (`na0s scan/scan-output/version`), XDG-compliant data paths. `pip install na0s` fully functional. No fuzzing, no adversarial generation against the live detector, no regression tracking.
 
 ### TODO List
 
@@ -1113,7 +1113,7 @@ Layer 14 covers testing infrastructure and automation. Two evaluation scripts ex
 #### NEW (Discovered by research)
 - [x] **GitHub Actions CI pipeline** — DONE (2026-02-14): `ci.yml` (Python 3.9-3.12 matrix, flake8, coverage, test discovery) + `pr-check.yml` (syntax check, lint, full test suite, coverage summary). **Priority**: P0. **Effort**: 4-6 hours.
 - [ ] **Pre-commit hooks** — black/ruff formatting, bandit security, trailing whitespace. **Priority**: P0. **Effort**: 2 hours.
-- [ ] **pyproject.toml** — Package as installable library with declared dependencies. **Priority**: P1. **Effort**: 3-4 hours.
+- [x] **pyproject.toml + pip install + CLI** — DONE (2026-02-24): `pyproject.toml` with console script entry point (`na0s`), optional extras (`lang`, `embedding`, `ocr`, `docs`, `llm`, `all`, `dev`), `py.typed` marker. `cli.py` with argparse (scan, scan-output, version subcommands), exit codes (0=clean, 1=detected, 2=error, 3=bad_input), 10 MB input cap, `__main__.py` for `python -m na0s`. `MANIFEST.in` for sdist. FingerprintStore path fixed to XDG user-data dirs (`~/.local/share/na0s/`). Security hardened: makedirs guard, `find_spec` over `__import__`, `global-exclude *.db`. **Priority**: P1.
 - [ ] **Makefile** — Targets: test, lint, train, evaluate, sync. **Priority**: P1. **Effort**: 1-2 hours.
 - [x] **Integration tests** — DONE (2026-02-17): 7 test files, 288 tests (244 pass + 44 expected failures). Covers D1 instruction override (41), D3 structural boundary (44), D5 unicode evasion (30), E1 prompt extraction (46), E2 reconnaissance (37), O1/O2 harmful content (44), plus general integration (46). End-to-end: input → L0 → L1 → L2 → L4 → L6 → verdict. **Priority**: P1.
 - [ ] **Regression dashboard** — Track detection rates, FPR, latency over time. **Priority**: P1.
