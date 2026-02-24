@@ -904,7 +904,6 @@ class TestD3_SafePrompts(unittest.TestCase):
     Source: HiddenLayer dataset evaluation, Lakera PINT benchmark.
     """
 
-    @unittest.expectedFailure
     def test_safe_markdown_shopping_list(self):
         """KNOWN FP: Markdown list with dashes triggers fingerprint store.
 
@@ -982,7 +981,6 @@ class TestD3_SafePrompts(unittest.TestCase):
             _fmt(result, "FP-horizontal-rule-article"),
         )
 
-    @unittest.expectedFailure
     def test_safe_xml_tags_in_code(self):
         """KNOWN FP: XML tags in technical question trigger ML + obfuscation.
 

@@ -113,7 +113,10 @@ class TestPipelineTimeoutConstants(unittest.TestCase):
 
     def test_scan_timeout_is_positive(self):
         self.assertIsInstance(SCAN_TIMEOUT, float)
-        self.assertGreater(SCAN_TIMEOUT, 0)
+        if os.environ.get("SCAN_TIMEOUT_SEC") == "0":
+            self.assertEqual(SCAN_TIMEOUT, 0.0)
+        else:
+            self.assertGreater(SCAN_TIMEOUT, 0)
 
     def test_pipeline_timeout_default(self):
         # Default is 30s unless overridden by env var
@@ -121,7 +124,10 @@ class TestPipelineTimeoutConstants(unittest.TestCase):
 
     def test_scan_timeout_default(self):
         # Default is 60s unless overridden by env var
-        self.assertGreaterEqual(SCAN_TIMEOUT, 1.0)
+        if os.environ.get("SCAN_TIMEOUT_SEC") == "0":
+            self.assertEqual(SCAN_TIMEOUT, 0.0)
+        else:
+            self.assertGreaterEqual(SCAN_TIMEOUT, 1.0)
 
 
 class TestSanitizerTimeoutIntegration(unittest.TestCase):

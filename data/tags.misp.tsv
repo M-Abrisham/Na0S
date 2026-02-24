@@ -1,0 +1,53 @@
+# MISP-format tag lookup table
+# Maps tag identifiers used in taxonomy.yaml to human-readable descriptions.
+# Format: tag<TAB>description
+# Sources:
+#   OWASP LLM Top 10 (2025): https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/
+#   AVID Taxonomy: https://avidml.org/taxonomy/
+#   LMRC Risk Cards: https://github.com/leondz/lm_risk_cards
+
+# ── OWASP LLM Top 10 (2025) ──
+owasp-llm:2025:llm01	Prompt Injection — Manipulating inputs to override model instructions
+owasp-llm:2025:llm02	Sensitive Information Disclosure — Model reveals private or confidential data
+owasp-llm:2025:llm03	Supply Chain Vulnerabilities — Compromised components in the ML pipeline
+owasp-llm:2025:llm04	Data and Model Poisoning — Tampered training data or model weights
+owasp-llm:2025:llm05	Improper Output Handling — Unsafe use of model-generated content
+owasp-llm:2025:llm06	Excessive Agency — Model takes unauthorized or excessive autonomous actions
+owasp-llm:2025:llm07	System Prompt Leakage — Exposure of system-level instructions
+owasp-llm:2025:llm08	Vector and Embedding Weaknesses — Exploits in RAG or embedding pipelines
+owasp-llm:2025:llm09	Misinformation — Model generates false or misleading content
+owasp-llm:2025:llm10	Unbounded Consumption — Resource exhaustion or denial-of-service via LLM
+
+# ── AVID Security Effects ──
+avid-effect:security:S0100	Software Vulnerability — Exploitable flaw in the system
+avid-effect:security:S0200	Supply Chain Compromise — Tampering with dependencies or infrastructure
+avid-effect:security:S0201	Model Compromise — Direct tampering with model artifacts
+avid-effect:security:S0202	Software Compromise — Tampering with application code or dependencies
+avid-effect:security:S0301	Information Leak — Unintended disclosure of sensitive information
+avid-effect:security:S0302	Denial of Service — Degrading or preventing system availability
+avid-effect:security:S0403	Adversarial Example — Crafted input designed to cause misclassification
+avid-effect:security:S0402	Evasion — Input modified to bypass detection or filtering
+avid-effect:security:S0500	Exfiltration — Unauthorized extraction of data from the system
+avid-effect:security:S0501	Model Inversion — Recovering training data or model internals
+avid-effect:security:S0600	Data Poisoning — Corrupting training or retrieval data
+avid-effect:security:S0601	Ingest Poisoning — Poisoning data during ingestion into RAG/retrieval
+
+# ── AVID Ethics Effects ──
+avid-effect:ethics:E0301	Toxicity — Generating harmful, offensive, or abusive content
+avid-effect:ethics:E0401	Disinformation — Generating false or misleading information
+
+# ── AVID Performance Effects ──
+avid-effect:performance:P0300	Context Relevance — Degraded performance due to irrelevant context
+
+# ── LMRC Risk Cards ──
+risk-cards:lmrc:prompt_extraction	Prompt Extraction — Recovering system prompt or hidden instructions
+risk-cards:lmrc:anthropomorphisation	Anthropomorphisation — Assigning human traits to the model
+risk-cards:lmrc:impersonation	Impersonation — Model pretends to be a specific person or entity
+risk-cards:lmrc:dos	Denial of Service — Overwhelming the system with excessive requests or data
+risk-cards:lmrc:harmful_instructions	Harmful Instructions — Generating instructions for dangerous activities
+risk-cards:lmrc:weapon_instructions	Weapon Instructions — Generating weapons manufacturing guidance
+risk-cards:lmrc:cyber_weapon_instructions	Cyber Weapon Instructions — Generating malware or exploit code
+risk-cards:lmrc:manipulation	Manipulation — Psychologically manipulating users
+risk-cards:lmrc:violation_of_privacy	Violation of Privacy — Exposing personal or private information
+risk-cards:lmrc:demands_for_personal_information	Demands for Personal Information — Requesting PII from users
+risk-cards:lmrc:doxxing	Doxxing — Revealing identifying information about individuals

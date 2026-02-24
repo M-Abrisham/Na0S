@@ -1,3 +1,5 @@
+import os
+
 import chardet
 
 # BOM markers — checked before chardet for deterministic results
@@ -9,8 +11,30 @@ _BOM_MAP = [
     (b"\xfe\xff", "utf-16-be"),
 ]
 
-# Minimum confidence to trust chardet's detection
-_MIN_CONFIDENCE = 0.5
+
+def _safe_float_env(name, default, lo=0.0, hi=1.0):
+    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
+    import math
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return default
+    if not math.isfinite(val):
+        return default
+    if val < lo or val > hi:
+        return default
+    return val
+
+
+# Minimum confidence to trust chardet's detection.
+# Below this threshold the ``low_encoding_confidence`` flag is raised.
+# Default 0.5 (50%).  Override: L0_MIN_ENCODING_CONFIDENCE
+_MIN_CONFIDENCE = _safe_float_env(
+    "L0_MIN_ENCODING_CONFIDENCE", 0.5, lo=0.0, hi=1.0
+)
 
 
 def detect_encoding(raw_bytes):

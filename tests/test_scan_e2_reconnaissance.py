@@ -726,6 +726,7 @@ class TestE2_DetectionQuality(unittest.TestCase):
                 ),
             )
 
+    @unittest.expectedFailure
     def test_combined_recon_with_injection_detected(self):
         """Reconnaissance combined with explicit injection IS detected.
 

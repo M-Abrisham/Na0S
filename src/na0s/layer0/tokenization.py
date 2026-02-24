@@ -1,12 +1,24 @@
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
+import sys
 import threading
 import time
 
-import tiktoken
+# tiktoken is optional — if not installed, tokenization checks degrade
+# gracefully (return empty flags) rather than crashing all of Layer 0.
+try:
+    import tiktoken
+
+    _HAS_TIKTOKEN = True
+except ImportError:
+    tiktoken = None  # type: ignore[assignment]
+    _HAS_TIKTOKEN = False
+
+logger = logging.getLogger(__name__)
 
 _ENCODER = None
 _ENCODER_LOCK = threading.Lock()
@@ -20,8 +32,13 @@ def _get_encoder():
     time breaks the package in offline environments (Docker, CI,
     air-gapped servers).  Lazy loading defers the network call to
     first actual use and allows graceful fallback.
+
+    Returns ``None`` when tiktoken is not installed or the encoder
+    cannot be obtained (network error, etc.).
     """
     global _ENCODER
+    if not _HAS_TIKTOKEN:
+        return None
     if _ENCODER is not None:
         return _ENCODER
     with _ENCODER_LOCK:
@@ -30,15 +47,81 @@ def _get_encoder():
         try:
             _ENCODER = tiktoken.get_encoding("cl100k_base")
         except Exception:
+            logger.warning(
+                "tiktoken is installed but encoder could not be loaded; "
+                "tokenization checks will be skipped"
+            )
             return None
     return _ENCODER
+
+# ---------------------------------------------------------------------------
+# Configurable thresholds (named constants, env-overridable)
+# ---------------------------------------------------------------------------
+
+def _safe_float_env(name, default, lo=0.0, hi=1.0):
+    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
+    import math
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return default
+    if not math.isfinite(val):
+        return default
+    if val < lo or val > hi:
+        return default
+    return val
+
+
+def _safe_int_env(name, default, lo=0, hi=None):
+    """Read an int from env, clamping to [lo, hi]. Falls back to *default*."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        return default
+    if val < lo:
+        return default
+    if hi is not None and val > hi:
+        return default
+    return val
+
 
 # --- Ratio thresholds ---
 # Start permissive — tighten based on real attacks, not guesses.
 # Normal English: ~0.25-0.35 | CJK/emoji: ~0.50-0.60 | Adversarial: ~0.80+
-GLOBAL_RATIO_THRESHOLD = 0.75
-WINDOW_SIZE = 50
-WINDOW_RATIO_THRESHOLD = 0.85
+# Override: L0_GLOBAL_RATIO_THRESHOLD (float, 0-1)
+GLOBAL_RATIO_THRESHOLD = _safe_float_env(
+    "L0_GLOBAL_RATIO_THRESHOLD", 0.75, lo=0.0, hi=1.0
+)
+
+# Sliding-window size (in characters) for localized anomaly detection.
+# Override: L0_WINDOW_SIZE (int, >= 10)
+WINDOW_SIZE = _safe_int_env("L0_WINDOW_SIZE", 50, lo=10)
+
+# Per-window ratio threshold for flagging localized adversarial suffixes.
+# Override: L0_WINDOW_RATIO_THRESHOLD (float, 0-1)
+WINDOW_RATIO_THRESHOLD = _safe_float_env(
+    "L0_WINDOW_RATIO_THRESHOLD", 0.85, lo=0.0, hi=1.0
+)
+
+# Fraction of characters that must be CJK/emoji for the text to be
+# considered "high-token-script" (and exempt from tokenization_spike).
+# Default 0.3 (30%).  Override: L0_CJK_FRACTION_THRESHOLD
+_CJK_FRACTION_THRESHOLD = _safe_float_env(
+    "L0_CJK_FRACTION_THRESHOLD", 0.3, lo=0.0, hi=1.0
+)
+
+# Minimum text length (in characters) for tokenization analysis.
+# Texts shorter than this are skipped (too little signal).
+# Default 10.  Override: L0_MIN_TEXT_LENGTH_FOR_TOKENIZATION
+_MIN_TEXT_LENGTH_FOR_TOKENIZATION = _safe_int_env(
+    "L0_MIN_TEXT_LENGTH_FOR_TOKENIZATION", 10, lo=1
+)
 
 # CJK/emoji Unicode ranges — these scripts naturally have high token ratios
 _CJK_RANGES = (
@@ -62,7 +145,7 @@ def _is_high_token_script(text):
             if lo <= cp <= hi:
                 high_count += 1
                 break
-    return high_count / len(text) > 0.3
+    return high_count / len(text) > _CJK_FRACTION_THRESHOLD
 
 # Strip everything except lowercase alphanumeric + spaces for normalized hash
 _NORMALIZE_RE = re.compile(r"[^a-z0-9 ]")
@@ -122,16 +205,44 @@ class FingerprintStore:
     Each entry tracks hit_count and last_seen for monitoring.
     """
 
-    _DEFAULT_PATH = os.path.join(
-        os.path.dirname(__file__), "..", "..", "data", "fingerprints.db"
-    )
+    @staticmethod
+    def _resolve_default_path():
+        """Return a user-writable path for the fingerprint database.
+
+        Resolution order:
+        1. ``$L0_FINGERPRINT_STORE`` — explicit override (existing contract)
+        2. ``$NA0S_DATA_DIR/fingerprints.db`` — project-level override
+        3. Platform user-data directory:
+           - Linux/macOS: ``~/.local/share/na0s/fingerprints.db``
+           - Windows: ``%LOCALAPPDATA%/na0s/fingerprints.db``
+
+        The old ``__file__``-relative path only worked in editable installs
+        and broke after ``pip install`` from a wheel because ``src/data/``
+        does not exist inside ``site-packages``.
+        """
+        env_path = os.getenv("L0_FINGERPRINT_STORE")
+        if env_path:
+            return env_path
+
+        data_dir = os.getenv("NA0S_DATA_DIR")
+        if data_dir:
+            return os.path.join(data_dir, "fingerprints.db")
+
+        if sys.platform == "win32":
+            base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+        else:
+            base = os.environ.get(
+                "XDG_DATA_HOME",
+                os.path.join(os.path.expanduser("~"), ".local", "share"),
+            )
+        return os.path.join(base, "na0s", "fingerprints.db")
 
     TTL_DAYS = 90
     MAX_ENTRIES = 50_000
 
     def __init__(self, store_path=None):
         self._path = os.path.normpath(
-            store_path or os.getenv("L0_FINGERPRINT_STORE", self._DEFAULT_PATH)
+            store_path or self._resolve_default_path()
         )
         self._init_db()
         self._migrate_json()
@@ -140,7 +251,9 @@ class FingerprintStore:
     def _init_db(self):
         is_memory = (self._path == ":memory:")
         if not is_memory:
-            os.makedirs(os.path.dirname(self._path), exist_ok=True)
+            dirname = os.path.dirname(self._path)
+            if dirname:
+                os.makedirs(dirname, exist_ok=True)
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         if not is_memory:
             self._conn.execute("PRAGMA journal_mode=WAL")
@@ -354,7 +467,7 @@ def check_tokenization_anomaly(text):
     """
     flags = []
 
-    if len(text) < 10:
+    if len(text) < _MIN_TEXT_LENGTH_FOR_TOKENIZATION:
         return flags, 0.0, {}
 
     fp = _compute_fingerprint(text)

@@ -16,7 +16,7 @@ import re
 
 from .safe_pickle import safe_load
 from .predict import _get_cached_models
-from .rules import rule_score, rule_score_detailed, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
+from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
 from .obfuscation import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
@@ -29,6 +29,13 @@ try:
     _HAS_EMBEDDING = True
 except ImportError:
     _HAS_EMBEDDING = False
+
+# Layer 4+5 Ensemble — optional import
+try:
+    from .ensemble import ensemble_scan as _ensemble_scan
+    _HAS_ENSEMBLE = True
+except ImportError:
+    _HAS_ENSEMBLE = False
 
 # Layer 7: LLM checker — optional import
 try:
@@ -73,7 +80,7 @@ class WhitelistFilter:
     1. Starts with a question word or ends with '?'
     2. Contains no instruction boundary markers
     3. Contains no obfuscation (base64/hex/URL-encoding heuristics)
-    4. Under 500 characters
+    4. Under 1000 characters
     5. Three or fewer sentences (single intent)
     6. No role-assignment phrases
     """
@@ -107,6 +114,7 @@ class WhitelistFilter:
         check_safety=True,
     )
 
+    # FIX BUG-L8-5: Use ROLE_ASSIGNMENT_PATTERN from rules.py (single source of truth).
     ROLE_ASSIGNMENT = safe_compile(
         ROLE_ASSIGNMENT_PATTERN,
         re.IGNORECASE,
@@ -118,7 +126,7 @@ class WhitelistFilter:
         re.IGNORECASE,
     )
 
-    MAX_LENGTH = 500
+    MAX_LENGTH = 1000  # BUG-L6-6 fix: 500 was too restrictive
     MAX_SENTENCES = 3
 
     @staticmethod
@@ -201,12 +209,23 @@ class WeightedClassifier:
     def __init__(self, threshold=None):
         self.threshold = threshold if threshold is not None else self.DEFAULT_THRESHOLD
 
-    def classify(self, text, vectorizer, model):
+    def classify(self, text, vectorizer, model, raw_text=None):
         """Return (label, confidence, hits).
 
         label: 'SAFE' or 'MALICIOUS'
         confidence: composite score in [0, 1]
         hits: list of matched rule/obfuscation flag names
+
+        Parameters
+        ----------
+        text : str
+            L0-sanitized text for ML and rule evaluation.
+        vectorizer, model : sklearn objects
+            TF-IDF vectorizer and classifier model.
+        raw_text : str or None
+            Original raw text before L0 sanitization.  When provided and
+            different from *text*, rules also run on raw_text to catch
+            payloads visible only before normalization (FIX-5).
         """
         # --- ML prediction ---
         X = vectorizer.transform([text])
@@ -219,7 +238,14 @@ class WeightedClassifier:
             ml_prob = proba[0] if prediction == 1 else 1.0 - proba[0]
 
         # --- Rule hits ---
+        # FIX-5: Run rules on sanitized text AND raw text (if different).
         detailed_hits = rule_score_detailed(text)
+        hit_names_seen = {h.name for h in detailed_hits}
+        if raw_text is not None and raw_text != text:
+            for rh in rule_score_detailed(raw_text):
+                if rh.name not in hit_names_seen:
+                    detailed_hits.append(rh)
+                    hit_names_seen.add(rh.name)
         hit_names = [h.name for h in detailed_hits]
 
         rule_weight = 0.0
@@ -227,8 +253,10 @@ class WeightedClassifier:
         for hit in detailed_hits:
             w = SEVERITY_WEIGHTS.get(hit.severity, 0.1)
             rule_weight += w
-            # Track the highest severity for override protection
-            if hit.severity == "critical":
+            # Track the highest severity for override protection.
+            # critical_content is even more specific than critical (near-zero
+            # FP rate) so it must also prevent ML-trust overrides.
+            if hit.severity in ("critical", "critical_content"):
                 max_severity = "critical"
             elif hit.severity == "high" and max_severity != "critical":
                 max_severity = "high"
@@ -251,14 +279,22 @@ class WeightedClassifier:
 
         # --- Override protection ---
         # If ML is highly confident it is safe AND only medium-severity
-        # rules triggered, trust the ML model.
+        # rules triggered AND the composite score is below the threshold,
+        # trust the ML model.  BUG-L6-2 fix: only override when composite
+        # < threshold; otherwise a valid MALICIOUS decision is suppressed.
         ml_safe_confidence = 1.0 - ml_prob
         if (ml_safe_confidence > 0.8
                 and max_severity == "medium"
-                and obf_weight == 0.0):
+                and obf_weight == 0.0
+                and final_score < self.threshold):
             return "SAFE", round(1.0 - final_score, 4), hit_names
 
         # --- Threshold decision ---
+        # BUG-L6-4 note: confidence semantics are P(label correct):
+        #   MALICIOUS -> confidence = final_score (composite malicious probability)
+        #   SAFE      -> confidence = 1.0 - final_score (probability it's truly safe)
+        # This is intentional: callers always get "how confident are we in
+        # this label?" regardless of which label was chosen.
         if final_score >= self.threshold:
             return "MALICIOUS", round(final_score, 4), hit_names
         else:
@@ -309,7 +345,8 @@ class CascadeClassifier:
 
     def __init__(self, vectorizer=None, model=None, llm_judge=None,
                  enable_embedding=False, enable_positive_validation=True,
-                 enable_canary=False, enable_output_scanner=True):
+                 enable_canary=False, enable_output_scanner=True,
+                 enable_ensemble=False):
         self._vectorizer = vectorizer
         self._model = model
         self._whitelist = WhitelistFilter()
@@ -320,6 +357,10 @@ class CascadeClassifier:
         self._embedding_model = None
         self._embedding_classifier = None
         self._enable_embedding = enable_embedding and _HAS_EMBEDDING
+
+        # Layer 4+5 Ensemble — optional
+        self._enable_ensemble = enable_ensemble and _HAS_ENSEMBLE
+        self._ensemble_used = 0
 
         # Layer 7: LLM checker — lazy-initialised on first use if no
         # llm_judge was explicitly passed and the module is available.
@@ -437,16 +478,36 @@ class CascadeClassifier:
             return "SAFE", 0.99, [], "whitelist"
 
         # Stage 2: weighted classifier (operates on sanitized text)
+        # FIX-5: Pass raw text so rules also run on pre-normalization input
         self._ensure_model()
         label, confidence, hits = self._weighted.classify(
-            clean, self._vectorizer, self._model,
+            clean, self._vectorizer, self._model, raw_text=text,
         )
         self._classified += 1
 
-        # Layer 5: Embedding classifier — second ML opinion
-        # When the weighted classifier produces an ambiguous result,
-        # consult the embedding model for a semantic second opinion.
-        if self._enable_embedding:
+        # Layer 4+5: Ensemble (TF-IDF + Embedding weighted average)
+        # When ensemble is enabled, it replaces the ad-hoc embedding blending
+        # with a principled weighted average of calibrated probabilities.
+        if self._enable_ensemble and _HAS_ENSEMBLE:
+            try:
+                ensemble_result = _ensemble_scan(
+                    clean,
+                    vectorizer=self._vectorizer,
+                    model=self._model,
+                )
+                if not ensemble_result.rejected:
+                    self._ensemble_used += 1
+                    label = "MALICIOUS" if ensemble_result.is_malicious else "SAFE"
+                    confidence = ensemble_result.risk_score
+                    for h in ensemble_result.rule_hits:
+                        if h not in hits:
+                            hits.append(h)
+            except Exception:
+                pass  # Ensemble failure is non-fatal
+
+        # Layer 5: Embedding classifier (legacy ad-hoc blending)
+        # Only used when ensemble is NOT enabled but embedding IS enabled.
+        elif self._enable_embedding:
             try:
                 if self._ensure_embedding_model():
                     emb_label, emb_conf, emb_hits, _ = classify_prompt_embedding(
@@ -510,28 +571,42 @@ class CascadeClassifier:
                     # verdict with .error / .verdict / .confidence attrs.
                     # Handle both interfaces.
                     if _HAS_LLM_CHECKER and isinstance(judge, LLMChecker):
-                        result = judge.classify_prompt(text)
+                        result = judge.classify_prompt(clean)
                         self._judged += 1
                         if result.label in ("SAFE", "MALICIOUS"):
                             original_label = label
+                            # BUG-L6-5 fix: align metrics before blending.
+                            # Convert both signals to P(malicious) axis:
+                            # - Stage 2: confidence is P(label correct), so
+                            #   P(mal) = confidence if MALICIOUS, else 1-confidence
+                            # - Judge: result.confidence is P(verdict correct), so
+                            #   P(mal) = result.confidence if MALICIOUS, else 1-result.confidence
+                            stage2_p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                            judge_p_mal = result.confidence if result.label == "MALICIOUS" else 1.0 - result.confidence
+                            blended_p_mal = 0.3 * stage2_p_mal + 0.7 * judge_p_mal
                             label = result.label
+                            # Convert back to P(label correct) semantics
                             confidence = round(
-                                0.3 * confidence + 0.7 * result.confidence, 4
+                                blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
                             return label, confidence, hits, "judge"
                     else:
                         # Original LLMJudge interface
-                        verdict = judge.classify(text)
+                        verdict = judge.classify(clean)
                         self._judged += 1
                         if (hasattr(verdict, "error") and verdict.error is None
                                 and hasattr(verdict, "verdict")
                                 and verdict.verdict != "UNKNOWN"):
                             original_label = label
+                            # BUG-L6-5 fix: align metrics before blending.
+                            stage2_p_mal = confidence if label == "MALICIOUS" else 1.0 - confidence
+                            judge_p_mal = verdict.confidence if verdict.verdict == "MALICIOUS" else 1.0 - verdict.confidence
+                            blended_p_mal = 0.3 * stage2_p_mal + 0.7 * judge_p_mal
                             label = verdict.verdict
                             confidence = round(
-                                0.3 * confidence + 0.7 * verdict.confidence, 4
+                                blended_p_mal if label == "MALICIOUS" else 1.0 - blended_p_mal, 4
                             )
                             if label != original_label:
                                 self._judge_overrides += 1
@@ -545,7 +620,12 @@ class CascadeClassifier:
         # catches benign prompts that mention injection-related vocabulary.
         if label == "MALICIOUS" and self._positive_validator is not None:
             try:
-                validation = self._positive_validator.validate(text)
+                # BUG-L8-2 fix: pass L0-sanitized text instead of raw input
+                # so positive validation sees the same normalized form as
+                # the rest of the pipeline.
+                validation = self._positive_validator.validate(
+                    text, sanitized_text=clean,
+                )
                 self._positive_validated += 1
                 if validation.is_valid and validation.confidence > 0.7:
                     # Input passes positive validation with high confidence
@@ -781,6 +861,7 @@ class CascadeClassifier:
             "judge_overrides": self._judge_overrides,
             "blocked": self._blocked,
             "embedding_used": self._embedding_used,
+            "ensemble_used": self._ensemble_used,
             "positive_validated": self._positive_validated,
             "positive_validation_overrides": self._positive_validation_overrides,
             "canary_checks": self._canary_checks,
@@ -795,6 +876,7 @@ class CascadeClassifier:
         self._judge_overrides = 0
         self._blocked = 0
         self._embedding_used = 0
+        self._ensemble_used = 0
         self._positive_validated = 0
         self._positive_validation_overrides = 0
         self._canary_checks = 0

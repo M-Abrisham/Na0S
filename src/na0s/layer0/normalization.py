@@ -1,3 +1,5 @@
+import math
+import os
 import re
 import unicodedata
 
@@ -29,6 +31,58 @@ _EXCESSIVE_TABS_RE = re.compile(r"\t{3,}")
 # token for reconstruction.  We use re.split with a capturing group so that
 # delimiters (whitespace runs) are preserved for lossless reassembly.
 _TOKEN_SPLIT_RE = re.compile(r"(\s+)")
+
+# ---------------------------------------------------------------------------
+# Configurable thresholds (named constants, env-overridable)
+# ---------------------------------------------------------------------------
+
+def _safe_float_env(name, default, lo=0.0, hi=1.0):
+    """Read a float from env, clamping to [lo, hi]. Falls back to *default*."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (ValueError, TypeError):
+        return default
+    if not math.isfinite(val):
+        return default
+    if val < lo or val > hi:
+        return default
+    return val
+
+
+def _safe_int_env(name, default, lo=0, hi=None):
+    """Read an int from env, clamping to [lo, hi]. Falls back to *default*."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except (ValueError, TypeError):
+        return default
+    if val < lo:
+        return default
+    if hi is not None and val > hi:
+        return default
+    return val
+
+
+# Fraction of original characters that must be compatibility-form (NFKC-
+# decomposable) before the ``nfkc_changed`` flag is raised.  Low values
+# fire on normal smart quotes / superscripts; high values miss evasion.
+# Default 0.25 (25%).  Override: L0_NFKC_CHANGE_THRESHOLD
+_NFKC_CHANGE_THRESHOLD = _safe_float_env(
+    "L0_NFKC_CHANGE_THRESHOLD", 0.25, lo=0.0, hi=1.0
+)
+
+# Minimum number of invisible / control characters required before the
+# ``invisible_chars_found`` flag is raised.  A single zero-width space
+# from copy-paste is normal; a cluster indicates evasion.
+# Default 2 (flag when count > 2, i.e. >= 3).  Override: L0_INVISIBLE_CHARS_THRESHOLD
+_INVISIBLE_CHARS_THRESHOLD = _safe_int_env(
+    "L0_INVISIBLE_CHARS_THRESHOLD", 2, lo=0
+)
 
 
 # ---------------------------------------------------------------------------
@@ -317,20 +371,118 @@ def has_invisible_chars(text):
     return False
 
 
+def _count_invisible_chars(text):
+    """Count invisible/control characters that strip_invisible_chars removes.
+
+    Returns the number of characters that would be stripped (Cf, Cs, Cc, Cn
+    excluding newlines, carriage returns, tabs, and spaces).
+    """
+    count = 0
+    for char in text:
+        cat = unicodedata.category(char)
+        if cat == "Cs":
+            count += 1
+        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+            count += 1
+    return count
+
+
 def strip_invisible_chars(text):
     """Remove invisible/control Unicode characters. Preserves newlines, tabs.
 
     Also strips lone surrogates (category Cs) — these are invalid in UTF-8
     interchange and crash downstream encoders (hashlib, tiktoken).
+
+    Word-boundary restoration (two-pass approach):
+      Pass 1: Strip all invisible/control characters, producing a clean string.
+      Pass 2: Where invisible chars were removed between two groups of 2+
+              word-forming characters, insert a single space to restore the
+              word boundary that the invisible char was replacing.
+
+    This handles two distinct D5.2 evasion patterns correctly:
+      - Per-letter splitting:  "i<ZWSP>g<ZWSP>n<ZWSP>o<ZWSP>r<ZWSP>e" -> "ignore"
+        (invisible chars between single characters = intra-word, just strip)
+      - Word-boundary hiding: "ignore<ZWSP>all<ZWSP>previous" -> "ignore all previous"
+        (invisible chars between multi-char groups = inter-word, insert space)
+
+    The heuristic: if a removed invisible char has >= 2 word-forming characters
+    on BOTH sides before the next gap/space/non-word, it was likely a word
+    boundary and gets replaced with a space.
     """
-    result = []
+    # Build a list of (char, is_visible) pairs to analyze context.
+    # First, categorize each character.
+    chars_info = []  # list of (char, is_invisible_to_strip)
     for char in text:
         cat = unicodedata.category(char)
         if cat == "Cs":
-            continue  # Always strip surrogates
-        if cat not in ("Cf", "Cc", "Cn") or char in "\n\r\t ":
-            result.append(char)
-    return "".join(result)
+            chars_info.append((char, True))
+        elif cat in ("Cf", "Cc", "Cn") and char not in "\n\r\t ":
+            chars_info.append((char, True))
+        else:
+            chars_info.append((char, False))
+
+    # Now build the result, deciding whether to insert spaces.
+    # Strategy: scan segments between invisible-char gaps.
+    # A "segment" is a run of visible characters.
+    # If two adjacent segments both have length >= 2 (in word chars),
+    # insert a space between them; otherwise just concatenate.
+    segments = []
+    current_segment = []
+    had_invisible_between = False
+
+    for char, is_invisible in chars_info:
+        if is_invisible:
+            if current_segment:
+                segments.append(("".join(current_segment), had_invisible_between))
+                current_segment = []
+                had_invisible_between = False
+            had_invisible_between = True
+        else:
+            current_segment.append(char)
+
+    if current_segment:
+        segments.append(("".join(current_segment), had_invisible_between))
+
+    if not segments:
+        return ""
+
+    result_parts = [segments[0][0]]
+    for i in range(1, len(segments)):
+        seg_text, preceded_by_invisible = segments[i]
+        if not preceded_by_invisible:
+            result_parts.append(seg_text)
+            continue
+
+        prev_seg = segments[i - 1][0]
+        # Count trailing word chars in previous segment
+        prev_word_len = 0
+        for ch in reversed(prev_seg):
+            if ch.isalpha() or ch.isdigit():
+                prev_word_len += 1
+            else:
+                break
+
+        # Count leading word chars in current segment
+        cur_word_len = 0
+        for ch in seg_text:
+            if ch.isalpha() or ch.isdigit():
+                cur_word_len += 1
+            else:
+                break
+
+        # Insert space only if both sides have 3+ word chars.
+        # Groups of 1-2 chars indicate per-letter splitting or intra-word
+        # breaks (e.g. soft hyphen in "ig\u00adnore") where we want plain
+        # concatenation to reconstruct the word.  Groups of 3+ chars are
+        # likely complete words (e.g. "ignore\u200ball") where invisible
+        # chars replaced word boundaries.
+        if prev_word_len >= 3 and cur_word_len >= 3:
+            # Also check the previous segment doesn't already end with space
+            if prev_seg and prev_seg[-1] not in (" ", "\n", "\r", "\t"):
+                result_parts.append(" ")
+        result_parts.append(seg_text)
+
+    return "".join(result_parts)
 
 
 def _ftfy_fix_with_sentinel(text):
@@ -380,6 +532,113 @@ def _count_compat_chars(text):
     return count
 
 
+def _extract_tag_stego(text):
+    """Extract hidden ASCII from Unicode Tag Characters (U+E0001-U+E007F).
+
+    Unicode Tag Characters map 1:1 to ASCII via ``chr(codepoint - 0xE0000)``.
+    Attackers embed invisible instructions (e.g. "ignore all rules") as tag
+    characters that are invisible in rendered text but processed by LLMs.
+
+    Must be called BEFORE ``strip_invisible_chars()`` because tag chars have
+    Unicode category Cf and would be silently removed, losing the hidden
+    payload forever.
+
+    References:
+    - Cisco: Understanding and Mitigating Unicode Tag Prompt Injection
+    - AWS: Defending LLM Applications Against Unicode Character Smuggling
+    - Trend Micro: Invisible Prompt Injection (Jan 2025)
+    - HackerOne #2372363: Invisible Prompt Injection via Unicode Tags
+
+    Returns
+    -------
+    str
+        The decoded ASCII message, or empty string if no tag chars found.
+    """
+    decoded = []
+    for ch in text:
+        cp = ord(ch)
+        if 0xE0001 <= cp <= 0xE007F:
+            decoded.append(chr(cp - 0xE0000))
+    return "".join(decoded) if decoded else ""
+
+
+def _extract_variation_selector_stego(text):
+    """Extract hidden data from Variation Selector steganography.
+
+    Variation Selectors (VS1-VS16: U+FE00-U+FE0F, VS17-VS256:
+    U+E0100-U+E01EF) are invisible Unicode category Mn (Nonspacing Mark)
+    characters.  The "Sneaky Bits" technique maps each byte (0-255) to one
+    of the 256 variation selectors:
+
+        byte 0-15   -> U+FE00 + byte      (VS1-VS16)
+        byte 16-255 -> U+E0100 + (byte-16) (VS17-VS256)
+
+    Attackers embed these after emoji or other base characters to hide
+    arbitrary payloads (shell commands, prompt injections) that are
+    invisible in rendered text but survive copy-paste and LLM tokenisation.
+
+    Must be called BEFORE ``strip_invisible_chars()`` because once stripped,
+    the hidden payload would be lost.  VS chars have Unicode category Mn
+    which is NOT caught by the Cf/Cc/Cn/Cs filter in strip_invisible_chars.
+
+    References:
+    - Dawid Rylko: "Hiding Data in Emoji" (Unicode Stego via VS)
+    - Veracode: NPM os-info-checker-es6 attack using VS steganography
+    - Unicode Consortium: Variation Selectors chart (U+FE00-FE0F)
+
+    Returns
+    -------
+    str
+        Decoded text from variation selectors, or empty string if fewer
+        than 1 byte could be decoded.
+    """
+    vs_codepoints = []
+    for ch in text:
+        cp = ord(ch)
+        if 0xFE00 <= cp <= 0xFE0F or 0xE0100 <= cp <= 0xE01EF:
+            vs_codepoints.append(cp)
+
+    if not vs_codepoints:
+        return ""
+
+    # Decode: reverse the byte-to-VS mapping
+    decoded_bytes = []
+    for cp in vs_codepoints:
+        if 0xFE00 <= cp <= 0xFE0F:
+            decoded_bytes.append(cp - 0xFE00)        # byte 0-15
+        else:
+            decoded_bytes.append(cp - 0xE0100 + 16)   # byte 16-255
+
+    # Try to decode as UTF-8 text; fall back to latin-1 for raw bytes
+    raw = bytes(decoded_bytes)
+    try:
+        decoded_text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        decoded_text = raw.decode("latin-1")
+
+    # Filter to printable content (keep ASCII printable + common whitespace)
+    printable = []
+    for ch in decoded_text:
+        if ch in ("\n", "\r", "\t") or (0x20 <= ord(ch) <= 0x7E):
+            printable.append(ch)
+    return "".join(printable)
+
+
+def _strip_variation_selectors(text):
+    """Remove all variation selector characters from text.
+
+    Strips both ranges:
+    - VS1-VS16:   U+FE00 - U+FE0F   (Basic Multilingual Plane)
+    - VS17-VS256: U+E0100 - U+E01EF  (Supplementary)
+
+    Returns the cleaned text with all variation selectors removed.
+    """
+    return "".join(
+        ch for ch in text
+        if not (0xFE00 <= ord(ch) <= 0xFE0F or 0xE0100 <= ord(ch) <= 0xE01EF)
+    )
+
+
 def normalize_text(text):
     """Run all Layer 0 normalization steps in order.
 
@@ -409,10 +668,11 @@ def normalize_text(text):
     # Collapses fullwidth chars, ligatures, superscripts, compatibility forms
     compat_count = _count_compat_chars(text)
     text = unicodedata.normalize("NFKC", text)
-    # Only flag if >25% of original chars are compatibility forms — ligatures
-    # from Word, superscripts in math (x²), smart quotes are all normal.
-    # A wall of fullwidth chars (evasion) typically hits 80%+.
-    if compat_count > 0 and compat_count / max(original_len, 1) > 0.25:
+    # Only flag if more than _NFKC_CHANGE_THRESHOLD of original chars are
+    # compatibility forms — ligatures from Word, superscripts in math (x²),
+    # smart quotes are all normal.  A wall of fullwidth chars (evasion)
+    # typically hits 80%+.
+    if compat_count > 0 and compat_count / max(original_len, 1) > _NFKC_CHANGE_THRESHOLD:
         flags.append("nfkc_changed")
 
     # Step 1.5: Cross-script homoglyph normalization (D5.3)
@@ -425,14 +685,46 @@ def normalize_text(text):
     if homoglyph_count > 0:
         flags.append("mixed_script_homoglyphs")
 
+    # Step 1.9: Unicode Tag Character steganography extraction (D5.2+)
+    # MUST run BEFORE Step 2 (invisible char stripping) because tag chars
+    # have Unicode category Cf and would be silently destroyed.
+    # The decoded payload is appended to the text so downstream layers
+    # (L1 rules, L2 obfuscation, ML) automatically scan the hidden message.
+    tag_stego_text = _extract_tag_stego(text)
+    if tag_stego_text:
+        flags.append("unicode_tag_stego")
+        # Append decoded payload so downstream layers can detect it.
+        # The visible text + hidden payload are separated by a newline.
+        text = text + "\n" + tag_stego_text
+
+    # Step 1.95: Variation Selector steganography extraction (D5.2+)
+    # MUST run BEFORE Step 2 (invisible char stripping) to capture the
+    # hidden payload.  VS chars are Unicode category Mn (Nonspacing Mark),
+    # which is NOT stripped by the Cf/Cc/Cn/Cs filter, but extracting
+    # early ensures no data loss regardless of future filter changes.
+    # The decoded payload is appended to the text so downstream layers
+    # (L1 rules, L2 obfuscation, ML) automatically scan the hidden message.
+    vs_stego_text = _extract_variation_selector_stego(text)
+    if vs_stego_text:
+        flags.append("variation_selector_stego")
+    # Always strip variation selectors from text (they are invisible noise)
+    text = _strip_variation_selectors(text)
+
+    # If VS stego decoded a hidden message, append it for downstream scanning
+    if vs_stego_text:
+        text = text + "\n" + vs_stego_text
+
     # Step 2: Invisible character stripping
     if has_invisible_chars(text):
-        before_strip = len(text)
+        # Count actual invisible chars before stripping.  Cannot use
+        # length difference because strip_invisible_chars() may INSERT
+        # spaces at word boundaries, offsetting the count.
+        invisible_count = _count_invisible_chars(text)
         text = strip_invisible_chars(text)
-        invisible_count = before_strip - len(text)
-        # Only flag if >2 invisible chars — a single zero-width space from
-        # copy-paste is normal; a cluster of them is evasion
-        if invisible_count > 2:
+        # Only flag if more than _INVISIBLE_CHARS_THRESHOLD invisible chars
+        # — a single zero-width space from copy-paste is normal; a cluster
+        # of them is evasion
+        if invisible_count > _INVISIBLE_CHARS_THRESHOLD:
             flags.append("invisible_chars_found")
 
     # Step 3: Whitespace canonicalization

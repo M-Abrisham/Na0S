@@ -152,6 +152,7 @@ class OutputScanner:
         weight = self._WEIGHT[self.sensitivity]
 
         # 1. System prompt leak
+        leak_flags: List[str] = []
         if system_prompt:
             leak_score, leak_flags = self._check_system_prompt_leak(
                 output_text, system_prompt
@@ -167,7 +168,7 @@ class OutputScanner:
             raw_score += echo_score * weight
             flags.extend(echo_flags)
 
-        # 3. Secret patterns
+        # 3. Secret patterns — produces initial redacted text
         secret_score, secret_flags, redacted = self._check_secret_patterns(
             output_text
         )
@@ -184,6 +185,23 @@ class OutputScanner:
         raw_score += enc_score * weight
         flags.extend(enc_flags)
 
+        # BUG-L9-2 fix: comprehensive redaction pass.
+        # _check_secret_patterns() already handled secrets in `redacted`.
+        # Now also redact role-break phrases and system prompt leak fragments.
+        if role_flags:
+            for pat in _ROLE_BREAK_PATTERNS:
+                redacted = pat.sub("[REDACTED]", redacted)
+        if leak_flags:
+            for flag in leak_flags:
+                # Flag format: "System prompt leak: matched 'the trigram text'"
+                if "matched '" in flag:
+                    fragment = flag.split("matched '", 1)[1].rstrip("'")
+                    if fragment:
+                        redacted = re.sub(
+                            re.escape(fragment), "[REDACTED]", redacted,
+                            flags=re.IGNORECASE,
+                        )
+
         risk_score = min(1.0, raw_score)
         threshold = self._THRESHOLD[self.sensitivity]
         is_suspicious = risk_score >= threshold or len(flags) > 0
@@ -192,7 +210,7 @@ class OutputScanner:
             is_suspicious=is_suspicious,
             risk_score=round(risk_score, 4),
             flags=flags,
-            redacted_text=redacted if redacted != output_text else output_text,
+            redacted_text=redacted,
         )
 
     def redact(self, text: str, patterns: Optional[List[re.Pattern]] = None) -> str:
