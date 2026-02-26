@@ -71,7 +71,7 @@ from .layer0.timeout import (
     SCAN_TIMEOUT,
     with_timeout,
 )
-from .obfuscation import obfuscation_scan
+from .layer2 import obfuscation_scan
 from .rules import rule_score_detailed, RULES, SEVERITY_WEIGHTS
 from .scan_result import ScanResult
 from .safe_pickle import safe_load

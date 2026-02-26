@@ -17,7 +17,7 @@ import re
 from .safe_pickle import safe_load
 from .predict import _get_cached_models
 from .rules import rule_score, rule_score_detailed, RULES, ROLE_ASSIGNMENT_PATTERN, SEVERITY_WEIGHTS
-from .obfuscation import obfuscation_scan
+from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .layer0.safe_regex import safe_search, safe_compile, RegexTimeoutError
 from .scan_result import ScanResult

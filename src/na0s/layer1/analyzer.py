@@ -23,9 +23,9 @@ from .unicode_defense import _fold_angle_homoglyphs, _strip_combining_marks
 from .context import _has_contextual_framing, _is_legitimate_roleplay, _CONTEXT_SUPPRESSIBLE
 from . import paranoia as _paranoia_mod
 from .ioc_extractor import refang
-from .syllable_splitting import dehyphenate_suspicious
-from .morse_code import detect_morse
-from .numeric_decode import detect_numeric
+from ..layer2.syllable_splitting import dehyphenate_suspicious
+from ..layer2.morse_code import detect_morse
+from ..layer2.numeric_decode import detect_numeric
 
 
 def rule_score(text):

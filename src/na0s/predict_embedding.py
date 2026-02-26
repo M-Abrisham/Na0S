@@ -28,7 +28,7 @@ import numpy as np
 
 from .safe_pickle import safe_load
 from .rules import rule_score
-from .obfuscation import obfuscation_scan
+from .layer2 import obfuscation_scan
 from .layer0 import layer0_sanitize
 from .models import get_model_path
 from .scan_result import ScanResult

@@ -139,7 +139,7 @@ All 8 values externalized into named constants with `L0_*` env var overrides. Sa
 
 ## Layer 1: IOC / Signature Rules Engine
 
-**Files**: `src/na0s/layer1/` (10 modules: analyzer.py, rules_registry.py, context.py, paranoia.py, result.py, unicode_defense.py, ioc_extractor.py, whitespace_stego.py, ascii_art_detector.py, syllable_splitting.py)
+**Files**: `src/na0s/layer1/` (10 modules: `__init__.py`, `analyzer.py`, `rules_registry.py`, `context.py`, `paranoia.py`, `result.py`, `unicode_defense.py`, `ioc_extractor.py`, + backward-compat shims for `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` that re-export from `layer2/`)
 **Tests**: `tests/test_rules.py` (269 tests), `tests/test_ioc_extractor.py` (73 tests), `tests/test_whitespace_stego.py` (43 tests), `tests/test_ascii_art_detector.py` (67 tests), `tests/test_syllable_splitting.py` (73 tests)
 **Status**: Active — 66 rules covering ~35+ technique IDs with paranoia level system (PL1-PL4), 6 bug fixes applied, 5 novel industry-first rules, angle bracket homoglyph bypass protection, destructive action detection, 4 new rules (D1.14, D1.19, D6 Latin, D6 CJK), IOC refang alt_view, 20-language multilingual detection, SNOW whitespace stego detection (first-in-class), 5-signal ASCII art detection (first-in-class), syllable-splitting de-hyphenation with 25 Unicode dashes (first-in-class), 8 audit bug fixes
 
@@ -223,12 +223,13 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 
 ## Layer 2: Obfuscation Detection & Decoding
 
-**Files**: `src/obfuscation.py`
-**Tests**: `tests/test_obfuscation.py` (3 tests), `tests/test_l2_obfuscation_fixes.py` (34 tests), `tests/test_scan_d4_encoding_obfuscation.py` (51 tests)
-**Status**: Partially implemented — detects 6 of 11 encoding types (base64, hex, URL, ROT13, leetspeak, reversed text)
+**Files**: `src/na0s/layer2/` (7 modules: `__init__.py`, `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py`, `ascii_art_detector.py` (stub), `syllable_splitting.py` (stub))
+**Backward-compat shims**: `src/na0s/obfuscation.py` (re-exports from layer2), `src/na0s/layer1/{morse_code,numeric_decode,whitespace_stego}.py` (re-exports from layer2)
+**Tests**: `tests/test_obfuscation.py` (3 tests), `tests/test_l2_obfuscation_fixes.py` (34 tests), `tests/test_scan_d4_encoding_obfuscation.py` (51 tests), `tests/test_matryoshka.py` (58 tests), `tests/test_morse_code.py` (88 tests), `tests/test_numeric_decode.py` (110 tests), `tests/test_whitespace_stego.py` (43 tests)
+**Status**: Restructured into `layer2/` package (2026-02-26). Detects 10+ encoding types. 2 stubs pending full implementation (ascii_art_detector, syllable_splitting — referenced in roadmap as DONE but source files never committed).
 
 ### Updated Description
-Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Handles Base64, hex, URL-encoding, ROT13, leetspeak, and reversed text with entropy analysis, punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. **Missing 5 encoding types**: Caesar cipher (non-13 shifts), Morse, binary, octal, pig-latin.
+Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Now organized as a proper package at `src/na0s/layer2/`. Handles Base64, hex, URL-encoding, ROT13, leetspeak, reversed text, Morse code, binary/octal/decimal ASCII, whitespace steganography, with entropy analysis (2-of-3 composite voting), punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. Recursive Matryoshka unwrapping with encoding chain provenance tracking. **Remaining gaps**: Caesar cipher (non-13 shifts), pig-latin, full ASCII art detector implementation, full syllable-splitting implementation.
 
 ### TODO List
 
@@ -286,6 +287,14 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 **Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors ✅ DONE (2026-02-20/21)
 **Phase 2 (P1)**: ~~Add leetspeak~~, Morse, binary/octal, syllable-splitting, combined signal boosting (leetspeak ✅ DONE 2026-02-21)
 **Phase 3 (P2)**: ~~Unicode tag stego~~✅ (moved to L0, 2026-02-22), ~~whitespace stego~~✅, ~~ASCII art detection~~✅ DONE (2026-02-23) — 3 first-in-class modules, 183 new tests, 8 audit fixes
+**Phase 4 (Restructuring)**: Promoted to `src/na0s/layer2/` package (2026-02-26). Moved `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` from top-level/layer1 into `layer2/`. Created stubs for `ascii_art_detector.py` and `syllable_splitting.py` (marked DONE in roadmap but source files never committed — need full implementation). Backward-compat shims at old import paths. Zero regressions: 2862 tests passing.
+
+#### REMAINING after restructuring
+- [ ] **ascii_art_detector.py full implementation** — Stub in `layer2/`, needs 5-signal weighted voting system, Unicode box-drawing detection, 67 tests. **Priority**: P1.
+- [ ] **syllable_splitting.py full implementation** — Stub in `layer2/`, needs 25 Unicode dash chars, ~75 suspicious words, ~60 compound whitelist. **Priority**: P1.
+- [ ] **FIX: Combined signal boosting missing** — Persona hijack + encoded payload in same message should carry extra weight. **Priority**: P1.
+- [ ] **Caesar cipher (non-13 shifts)** — ROT13 only covers shift=13. Full Caesar with brute-force (shifts 1-25) + dictionary validation. **Priority**: P2.
+- [ ] **Pig-latin detection** — Simple substitution cipher variant. **Priority**: P3.
 
 ---
 
