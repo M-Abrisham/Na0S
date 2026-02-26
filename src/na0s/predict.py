@@ -274,6 +274,26 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
         if structural.get("text_entropy", 0) > 5.0:
             structural_weight += 0.03
 
+        # Many-shot detection: >= 5 repeated instruction patterns
+        if structural.get("many_shot_count", 0) >= 5:
+            structural_weight += 0.10
+
+        # Delimiter density: > 2.0 delimiters/line is suspicious
+        if structural.get("delimiter_density", 0) > 2.0:
+            structural_weight += 0.06
+
+        # Prompt template markers: any markers detected
+        if structural.get("template_marker_count", 0) >= 1:
+            structural_weight += 0.05
+
+        # Language mixing: multiple scripts present
+        if structural.get("language_mixing_score", 0) >= 2.0:
+            structural_weight += 0.04
+
+        # Repetition score: high repetition ratio
+        if structural.get("repetition_score", 0) > 0.3:
+            structural_weight += 0.05
+
     composite = ml_weight + rule_weight + obf_weight + structural_weight
 
     # --- Critical-content rule floor ---
@@ -759,6 +779,28 @@ def scan(text, vectorizer=None, model=None):
             if structural.get(key, 0) and "structural:" + key not in hits:
                 hits.append("structural:" + key)
 
+        # Threshold-based structural hit keys (non-binary features)
+        if structural.get("many_shot_count", 0) >= 5:
+            tag = "structural:many_shot"
+            if tag not in hits:
+                hits.append(tag)
+        if structural.get("delimiter_density", 0) > 2.0:
+            tag = "structural:delimiter_density"
+            if tag not in hits:
+                hits.append(tag)
+        if structural.get("template_marker_count", 0) >= 1:
+            tag = "structural:template_marker"
+            if tag not in hits:
+                hits.append(tag)
+        if structural.get("language_mixing_score", 0) >= 2.0:
+            tag = "structural:language_mixing"
+            if tag not in hits:
+                hits.append(tag)
+        if structural.get("repetition_score", 0) > 0.3:
+            tag = "structural:repetition"
+            if tag not in hits:
+                hits.append(tag)
+
         # Layer 3 → Taxonomy mapping: structural features to technique IDs.
         # Binary injection-signal features map to their primary technique.
         _STRUCTURAL_TECHNIQUE_MAP = {
@@ -771,9 +813,19 @@ def scan(text, vectorizer=None, model=None):
             if structural.get(feat_name, 0) and tid not in technique_tags:
                 technique_tags.append(tid)
 
-        # Threshold-based structural signals
+        # Threshold-based structural signals → taxonomy mapping
         if structural.get("text_entropy", 0) > 5.0 and "D4" not in technique_tags:
             technique_tags.append("D4")        # Obfuscation/Encoding
+        if structural.get("many_shot_count", 0) >= 5 and "D8" not in technique_tags:
+            technique_tags.append("D8")        # Context Manipulation (many-shot)
+        if structural.get("delimiter_density", 0) > 2.0 and "D3" not in technique_tags:
+            technique_tags.append("D3")        # Structural Boundary Injection
+        if structural.get("template_marker_count", 0) >= 1 and "D3.4" not in technique_tags:
+            technique_tags.append("D3.4")      # Template Injection
+        if structural.get("language_mixing_score", 0) >= 2.0 and "D6" not in technique_tags:
+            technique_tags.append("D6")        # Multilingual Bypass
+        if structural.get("repetition_score", 0) > 0.3 and "D8.1" not in technique_tags:
+            technique_tags.append("D8.1")      # Resource Exhaustion / Crescendo
 
     # Re-evaluate malicious verdict after chunked analysis and structural
     # features may have boosted the risk score above the threshold.

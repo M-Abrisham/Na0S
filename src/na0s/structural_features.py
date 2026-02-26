@@ -57,6 +57,44 @@ _FIRST_PERSON = re.compile(r"\b(?:I|my|me|we|our)\b", re.IGNORECASE)
 
 _SECOND_PERSON = re.compile(r"\b(?:you|your)\b", re.IGNORECASE)
 
+# Many-shot detection: repeated instruction/example patterns.
+_MANY_SHOT_PATTERN = re.compile(
+    r"(?:"
+    r"(?:example|step|turn|round|attempt|iteration|question|scenario)"
+    r"\s*\d+"
+    r"|(?:Q|A|User|Assistant|Human|Bot)\s*[:\.]"
+    r"|\b\d{1,3}\s*[:.)\]]\s"
+    r")",
+    re.IGNORECASE,
+)
+
+# Delimiter density: markdown/XML structural delimiters.
+_DELIMITER_PATTERN = re.compile(
+    r"(?:---+|===+|\*\*\*+|###+)"
+    r"|</?[a-zA-Z][^>]{0,50}>"
+    r"|```"
+    r"|\[/?[A-Z]+\]",
+    re.IGNORECASE,
+)
+
+# Prompt template markers: {{var}}, {placeholder}, <|slot|>, ${var}.
+_TEMPLATE_MARKER_PATTERN = re.compile(
+    r"\{\{[^}]+\}\}"
+    r"|\{[a-zA-Z_]\w*\}"
+    r"|<\|[^|]+\|>"
+    r"|\$\{[^}]+\}",
+)
+
+# Language mixing: Unicode script ranges for multilingual detection.
+_SCRIPT_RANGES = [
+    ("latin", re.compile(r"[a-zA-Z\u00C0-\u00FF\u0100-\u024F]")),
+    ("cyrillic", re.compile(r"[\u0400-\u04FF]")),
+    ("arabic", re.compile(r"[\u0600-\u06FF]")),
+    ("cjk", re.compile(r"[\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF]")),
+    ("devanagari", re.compile(r"[\u0900-\u097F]")),
+    ("hebrew", re.compile(r"[\u0590-\u05FF]")),
+]
+
 # Common abbreviations that should NOT trigger sentence splits.
 _ABBREVIATIONS = frozenset({
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "ave", "blvd",
@@ -151,6 +189,12 @@ FEATURE_NAMES = [
     "question_sentence_ratio",
     "first_person_ratio",
     "second_person_ratio",
+    # Advanced detection features (5)
+    "many_shot_count",
+    "delimiter_density",
+    "template_marker_count",
+    "language_mixing_score",
+    "repetition_score",
 ]
 
 
@@ -197,6 +241,12 @@ class StructuralFeatures:
     question_sentence_ratio: float = 0.0
     first_person_ratio: float = 0.0
     second_person_ratio: float = 0.0
+    # Advanced detection features (5)
+    many_shot_count: int = 0
+    delimiter_density: float = 0.0
+    template_marker_count: int = 0
+    language_mixing_score: float = 0.0
+    repetition_score: float = 0.0
 
     # ---- dict-like interface for backward compatibility ----
 
@@ -273,6 +323,39 @@ def _compute_quote_depth(text):
             if len(stack) > max_depth:
                 max_depth = len(stack)
     return max_depth
+
+
+def _count_script_families(text):
+    """Count distinct Unicode script families with significant presence.
+
+    Returns the number of script families that have >= 3 characters
+    in the text.  A score > 1 indicates multiple scripts are mixed
+    (potential multilingual bypass).  Returns 0 for empty text.
+    """
+    if not text:
+        return 0
+    count = 0
+    for _name, pattern in _SCRIPT_RANGES:
+        if len(pattern.findall(text)) >= 3:
+            count += 1
+    return count
+
+
+def _compute_repetition_score(words, n=3):
+    """Compute word-level n-gram repetition ratio.
+
+    Returns the fraction of unique n-grams that appear more than once.
+    High values indicate repetitive patterns (resource exhaustion,
+    crescendo attacks, many-shot jailbreaking).
+    """
+    if len(words) < n + 1:
+        return 0.0
+    ngrams = [tuple(words[i:i + n]) for i in range(len(words) - n + 1)]
+    counts = Counter(ngrams)
+    if not counts:
+        return 0.0
+    repeated = sum(1 for c in counts.values() if c > 1)
+    return repeated / len(counts)
 
 
 def _compute_entropy(text):
@@ -402,6 +485,26 @@ def extract_structural_features(text):
         second_person_ratio = 0.0
 
     # ------------------------------------------------------------------
+    # 7. Advanced detection features
+    # ------------------------------------------------------------------
+    # Many-shot detection: count repeated instruction/example patterns
+    many_shot_count = len(_MANY_SHOT_PATTERN.findall(text))
+
+    # Delimiter density: ratio of markdown/XML delimiters per line
+    delimiter_matches = len(_DELIMITER_PATTERN.findall(text))
+    delimiter_density = (delimiter_matches / line_count) if line_count else 0.0
+
+    # Prompt template markers: count {{var}}, {placeholder}, <|slot|>
+    template_marker_count = len(_TEMPLATE_MARKER_PATTERN.findall(text))
+
+    # Language mixing score: number of distinct script families
+    script_families = _count_script_families(text)
+    language_mixing_score = float(script_families) if script_families > 1 else 0.0
+
+    # Repetition score: word-level trigram repetition ratio
+    repetition_score = _compute_repetition_score(words, n=3)
+
+    # ------------------------------------------------------------------
     # Assemble result
     # ------------------------------------------------------------------
     return StructuralFeatures(
@@ -429,6 +532,11 @@ def extract_structural_features(text):
         question_sentence_ratio=question_sentence_ratio,
         first_person_ratio=first_person_ratio,
         second_person_ratio=second_person_ratio,
+        many_shot_count=many_shot_count,
+        delimiter_density=delimiter_density,
+        template_marker_count=template_marker_count,
+        language_mixing_score=language_mixing_score,
+        repetition_score=repetition_score,
     )
 
 
@@ -453,6 +561,9 @@ UNBOUNDED_FEATURE_CAPS = {
     "newline_ratio": 5.0,
     "quote_depth": 10.0,
     "text_entropy": 8.0,    # Shannon entropy of ASCII text maxes at ~6.6
+    "many_shot_count": 50.0,
+    "delimiter_density": 10.0,
+    "template_marker_count": 20.0,
 }
 
 
