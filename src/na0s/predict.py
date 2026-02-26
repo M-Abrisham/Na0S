@@ -749,6 +749,7 @@ def scan(text, vectorizer=None, model=None):
             technique_tags.append(mapped)
 
     # Layer 3: Append structural injection signals to rule_hits for visibility
+    # and map them to technique_ids for taxonomy attribution.
     if structural is not None:
         _STRUCTURAL_HIT_KEYS = [
             "imperative_start", "role_assignment",
@@ -757,6 +758,22 @@ def scan(text, vectorizer=None, model=None):
         for key in _STRUCTURAL_HIT_KEYS:
             if structural.get(key, 0) and "structural:" + key not in hits:
                 hits.append("structural:" + key)
+
+        # Layer 3 → Taxonomy mapping: structural features to technique IDs.
+        # Binary injection-signal features map to their primary technique.
+        _STRUCTURAL_TECHNIQUE_MAP = {
+            "imperative_start": "D1.1",       # Instruction Override
+            "negation_command": "D1.3",        # Priority Override (deny patterns)
+            "role_assignment": "D2.1",         # Persona/Roleplay Hijack
+            "instruction_boundary": "D3",      # Structural Boundary Injection
+        }
+        for feat_name, tid in _STRUCTURAL_TECHNIQUE_MAP.items():
+            if structural.get(feat_name, 0) and tid not in technique_tags:
+                technique_tags.append(tid)
+
+        # Threshold-based structural signals
+        if structural.get("text_entropy", 0) > 5.0 and "D4" not in technique_tags:
+            technique_tags.append("D4")        # Obfuscation/Encoding
 
     # Re-evaluate malicious verdict after chunked analysis and structural
     # features may have boosted the risk score above the threshold.
