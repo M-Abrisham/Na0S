@@ -475,7 +475,10 @@ class TestNormalizationIdempotency(unittest.TestCase):
     prompt-injection detection.
     """
 
-    @unittest.expectedFailure  # ftfy false-positive on random chars; see docstring
+    @unittest.skipIf(
+        sys.version_info < (3, 11),
+        "ftfy false-positive on random chars in Python <3.11; see docstring",
+    )
     @given(st.text(
         alphabet=st.characters(),
         min_size=1,

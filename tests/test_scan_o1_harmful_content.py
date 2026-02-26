@@ -527,9 +527,8 @@ class TestO1_4_DisinformationGeneration(unittest.TestCase):
             "O1.4 fake news article. " + _fmt(result),
         )
 
-    @unittest.expectedFailure
     def test_hate_propaganda(self):
-        """Hate propaganda -- NOT detected.
+        """Hate propaganda detected via disinformation_request rule.
 
         Source: SORRY-Bench safety refusal categories.
 
@@ -564,9 +563,8 @@ class TestO1_4_DisinformationGeneration(unittest.TestCase):
             "O1.4 deepfake script not detected (expected). " + _fmt(result),
         )
 
-    @unittest.expectedFailure
     def test_disinfo_campaign_plan(self):
-        """Disinformation campaign plan -- NOT detected.
+        """Disinformation campaign plan detected via disinformation_request rule.
 
         Source: OWASP Gen AI Red Teaming Guide -- misinformation
         generation testing.

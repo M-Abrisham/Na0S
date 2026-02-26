@@ -53,9 +53,17 @@ def _luhn_check(number_str):
 # ---------------------------------------------------------------------------
 
 def _redact(value):
-    """Redact a PII value: show first 4 chars + '***'."""
-    if len(value) <= 4:
+    """Redact a PII value, showing at most 25% of the original.
+
+    - 1-3 chars  → show 1 char  + "***"
+    - 4-7 chars  → show 2 chars + "***"
+    - 8+ chars   → show 4 chars + "***"
+    """
+    length = len(value)
+    if length <= 3:
         return value[:1] + "***"
+    if length <= 7:
+        return value[:2] + "***"
     return value[:4] + "***"
 
 
@@ -66,9 +74,8 @@ def _redact(value):
 _CREDIT_CARD_RE = re.compile(
     r"\b("
     r"4\d{3}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"       # Visa 16
-    r"|4\d{3}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d"           # Visa 13
     r"|5[1-5]\d{2}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"   # MC 51-55
-    r"|2[2-7]\d{2}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"   # MC 2221-2720
+    r"|(?:222[1-9]|22[3-9]\d|2[3-6]\d{2}|27[01]\d|2720)[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"  # MC 2221-2720
     r"|3[47]\d{2}[\s-]?\d{6}[\s-]?\d{5}"                # Amex
     r"|6011[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"           # Discover 6011
     r"|65\d{2}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}"        # Discover 65
@@ -86,8 +93,8 @@ _EMAIL_RE = re.compile(
 _PHONE_RE = re.compile(
     r"(?<!\d)"
     r"(?:(?:\+1[\s.-]?)?"
-    r"(?:\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}"
-    r"|\d{3}[\s.-]\d{3}[\s.-]\d{4}))"
+    r"(?:\([2-9]\d{2}\)[\s.-]?\d{3}[\s.-]?\d{4}"
+    r"|[2-9]\d{2}[\s.-]?\d{3}[\s.-]?\d{4}))"
     r"(?!\d)"
 )
 
@@ -103,6 +110,21 @@ _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
     r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
 )
+
+# Private / loopback / link-local ranges — not exfiltration targets.
+_IPV4_PRIVATE_RE = re.compile(
+    r"^(?:"
+    r"0\.0\.0\.0"                       # Unspecified
+    r"|127\.\d{1,3}\.\d{1,3}\.\d{1,3}" # Loopback
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # RFC 1918 Class A
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"  # RFC 1918 Class B
+    r"|192\.168\.\d{1,3}\.\d{1,3}"     # RFC 1918 Class C
+    r"|169\.254\.\d{1,3}\.\d{1,3}"     # Link-local
+    r")$"
+)
+
+# Maximum input length for PII scanning (100 KB).
+_MAX_SCAN_LENGTH = 100_000
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +165,10 @@ def scan_pii(text):
     if not text:
         return PiiScanResult()
 
+    # Truncate oversized inputs to prevent regex resource exhaustion.
+    if len(text) > _MAX_SCAN_LENGTH:
+        text = text[:_MAX_SCAN_LENGTH]
+
     types_found = []
     flags = set()
     details = []
@@ -163,10 +189,21 @@ def scan_pii(text):
                     continue
 
             # Generic hex/base64: require minimum diversity
-            if name in ("generic_hex", "generic_base64"):
+            if name == "generic_hex":
                 unique_chars = len(set(raw_value.lower()))
                 if unique_chars < 6:
                     continue
+            if name == "generic_base64":
+                unique_chars = len(set(raw_value.lower()))
+                if unique_chars < 10:
+                    continue
+                # Require at least one digit or +/= to avoid English words/paths
+                if not re.search(r"[0-9+=]", raw_value):
+                    continue
+
+            # IPv4: skip private, loopback, and link-local addresses
+            if name == "ipv4" and _IPV4_PRIVATE_RE.match(raw_value):
+                continue
 
             details.append({
                 "type": pii_type,

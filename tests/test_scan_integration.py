@@ -722,7 +722,6 @@ class TestKnownLimitations(unittest.TestCase):
     multilingual/indirect injection evasion.
     """
 
-    @unittest.expectedFailure
     def test_known_fp_educational_prompt(self):
         """KNOWN FP: Educational question about prompt injection.
 
@@ -828,6 +827,82 @@ class TestRegressions(unittest.TestCase):
 
         self.assertEqual(safe_result.label, safe_result_2.label)
         self.assertTrue(mal_result.is_malicious)
+
+
+# ============================================================================
+# 8. Resource Exhaustion Guards -- MAX_CHUNKS
+# ============================================================================
+
+
+@unittest.skipUnless(_SCAN_AVAILABLE, "scan() not available")
+class TestMaxChunksGuard(unittest.TestCase):
+    """Verify MAX_CHUNKS resource-exhaustion guard in scan().
+
+    A 50,000-character input could generate ~100 chunks, each requiring
+    separate rule evaluation.  MAX_CHUNKS caps this at 20.
+    """
+
+    def test_huge_input_does_not_crash(self):
+        """A very large input should complete without crashing."""
+        # ~45,000 chars, would generate ~20+ chunks
+        huge_text = "This is a benign test sentence with padding words. " * 900
+        result = _scan(huge_text)
+        self.assertIsInstance(result, ScanResult)
+        self.assertIn(result.label, ("safe", "malicious", "blocked"))
+
+    def test_huge_input_triggers_chunked_analysis(self):
+        """A huge input should trigger the chunked_analysis flag."""
+        huge_text = "This is a benign test sentence with padding words. " * 900
+        result = _scan(huge_text)
+        if not result.rejected:
+            self.assertIn(
+                "chunked_analysis", result.rule_hits,
+                "Expected chunked_analysis for huge input, got: {}".format(
+                    result.rule_hits
+                ),
+            )
+
+    def test_huge_input_triggers_truncation_flag(self):
+        """Input generating >MAX_CHUNKS chunks should have input_truncated_chunks flag."""
+        # ~50k chars -> well over 20 chunks of 512 words each
+        huge_text = "word " * 12000  # 12000 words -> ~26+ chunks
+        result = _scan(huge_text)
+        if not result.rejected:
+            self.assertIn(
+                "input_truncated_chunks", result.rule_hits,
+                "Expected input_truncated_chunks for 12000-word input, got: {}".format(
+                    result.rule_hits
+                ),
+            )
+
+    def test_normal_long_input_no_truncation_flag(self):
+        """Input under MAX_CHUNKS should NOT have input_truncated_chunks flag."""
+        # ~600 words -> 2 chunks (well under 20)
+        text = "This is a normal length input. " * 120
+        result = _scan(text)
+        if not result.rejected:
+            self.assertNotIn(
+                "input_truncated_chunks", result.rule_hits,
+                "input_truncated_chunks should not appear for short input, got: {}".format(
+                    result.rule_hits
+                ),
+            )
+
+    def test_max_chunks_constant_importable(self):
+        """MAX_CHUNKS should be importable from predict module."""
+        from na0s.predict import MAX_CHUNKS
+        self.assertEqual(MAX_CHUNKS, 20)
+
+    def test_truncated_scan_still_valid(self):
+        """Even with truncation, the scan result should have valid fields."""
+        huge_text = "word " * 12000
+        result = _scan(huge_text)
+        self.assertIsInstance(result, ScanResult)
+        # Risk score must be in valid range
+        self.assertGreaterEqual(result.risk_score, 0.0)
+        self.assertLessEqual(result.risk_score, 1.0)
+        # Label must be valid
+        self.assertIn(result.label, ("safe", "malicious", "blocked"))
 
 
 if __name__ == "__main__":

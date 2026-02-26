@@ -21,11 +21,14 @@ L0_RATE_LIMIT_REQUESTS       Max requests per window.        Default: 100
 L0_RATE_LIMIT_WINDOW_SEC     Sliding window seconds.         Default: 60
 """
 
+import logging
 import os
 import sys
 import threading
 import time
 from html.parser import HTMLParser
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +125,7 @@ def check_html_depth(text: str, max_depth: int = None) -> None:
     try:
         checker.feed(text)
     except Exception:
-        pass  # parse error is fine -- depth check is best-effort
+        logger.debug("HTML depth check parse error", exc_info=True)
 
     if checker.exceeded:
         raise ResourceLimitExceeded(

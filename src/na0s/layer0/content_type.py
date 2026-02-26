@@ -13,8 +13,11 @@ Tiers:
 """
 
 import base64
+import logging
 import re
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +192,7 @@ def _decode_and_rescan(b64_string):
     try:
         decoded = base64.b64decode(b64_string, validate=True)
     except Exception:
+        logger.debug("Base64 decode+rescan failed", exc_info=True)
         return []
 
     if len(decoded) > _BASE64_MAX_DECODED_LEN:
