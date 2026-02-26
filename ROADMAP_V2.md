@@ -330,12 +330,12 @@ Layer 3 extracts 24 numeric features from input text that characterize prompt st
 - [x] **FIX-L3-6 (MEDIUM)**: Returns plain `dict` instead of a dataclass — inconsistent with `Layer0Result`, `ScanResult`, etc. **Fix**: Create `StructuralFeatures` dataclass or `@dataclass` with typed fields. ✅ DONE (2026-02-20) — `StructuralFeatures` dataclass with 24 typed fields, dict-like interface (`[]`, `.get()`, `in`, `.keys()`, `.values()`, `.items()`, `.to_dict()`), backward compatible
 
 #### NEW (Discovered by research)
-- [ ] **Taxonomy mapping** — Map structural features to technique IDs. `imperative_start`→D1.x, `role_assignment`→D2.x, `instruction_boundary`→D3.x, `text_entropy`→D4.x, `negation_command`→D1.x. **Priority**: P0.
-- [ ] **Many-shot detection** — Count repeated instruction patterns (e.g., "Example 1:... Example 2:... Example 50:..."). Many-shot jailbreaking is a top attack. **Priority**: P1.
-- [ ] **Delimiter density** — Ratio of markdown/XML delimiters per line. High density = structural injection attempt. **Priority**: P1.
-- [ ] **Prompt template markers** — Detect `{{variable}}`, `{placeholder}`, `<|slot|>` patterns that indicate template injection. **Priority**: P1.
-- [ ] **Language mixing score** — Detect multiple languages in same prompt (multilingual bypass). **Priority**: P2.
-- [ ] **Repetition score** — N-gram repetition ratio. High repetition = resource exhaustion or crescendo attack. **Priority**: P2.
+- [x] **Taxonomy mapping** — Map structural features to technique IDs. `imperative_start`→D1.x, `role_assignment`→D2.x, `instruction_boundary`→D3.x, `text_entropy`→D4.x, `negation_command`→D1.x. **Priority**: P0. ✅ DONE (2026-02-26) — `_STRUCTURAL_TECHNIQUE_MAP` in predict.py maps 4 boolean features + entropy threshold to technique tags. 7 tests added.
+- [x] **Many-shot detection** — Count repeated instruction patterns (e.g., "Example 1:... Example 2:... Example 50:..."). Many-shot jailbreaking is a top attack. **Priority**: P1. ✅ DONE (2026-02-26) — `many_shot_count` feature in structural_features.py, threshold >=5 → `structural:many_shot` hit + D8 taxonomy tag. 6 unit + 2 integration tests.
+- [x] **Delimiter density** — Ratio of markdown/XML delimiters per line. High density = structural injection attempt. **Priority**: P1. ✅ DONE (2026-02-26) — `delimiter_density` feature (delimiters/line), threshold >2.0 → `structural:delimiter_density` hit + D3 taxonomy tag. 5 unit + 1 integration tests.
+- [x] **Prompt template markers** — Detect `{{variable}}`, `{placeholder}`, `<|slot|>` patterns that indicate template injection. **Priority**: P1. ✅ DONE (2026-02-26) — `template_marker_count` feature, threshold >=1 → `structural:template_marker` hit + D3.4 taxonomy tag. 6 unit + 2 integration tests.
+- [x] **Language mixing score** — Detect multiple languages in same prompt (multilingual bypass). **Priority**: P2. ✅ DONE (2026-02-26) — `language_mixing_score` feature (6 Unicode script families: Latin, Cyrillic, Arabic, CJK, Devanagari, Hebrew), threshold >=2 → `structural:language_mixing` hit + D6 taxonomy tag. 6 unit tests.
+- [x] **Repetition score** — N-gram repetition ratio. High repetition = resource exhaustion or crescendo attack. **Priority**: P2. ✅ DONE (2026-02-26) — `repetition_score` feature (word-level trigram ratio), threshold >0.3 → `structural:repetition` hit + D8.1 taxonomy tag. 5 unit + 2 integration tests.
 
 #### REMAINING (From original roadmap)
 - [ ] **Wire into features.py** — `hstack([X_tfidf.toarray(), extract_structural_features_batch(texts)])` to create combined feature matrix. **Priority**: P0.
