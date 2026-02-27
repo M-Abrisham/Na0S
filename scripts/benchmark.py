@@ -45,11 +45,42 @@ def _run_na0s(text, threshold):
     }
 
 
+def _run_llm_guard(text, threshold):
+    """Run LLM Guard scan and return a normalised prediction dict."""
+    from scripts.wrappers.llm_guard import LLMGuardWrapper
+
+    if not hasattr(_run_llm_guard, "_wrapper"):
+        _run_llm_guard._wrapper = LLMGuardWrapper()
+
+    result = _run_llm_guard._wrapper.predict(text)
+    return {
+        "prediction": result["label"],
+        "score": result["score"],
+        "latency_ms": result["latency_ms"],
+        "label": "MALICIOUS" if result["label"] == 1 else "SAFE",
+    }
+
+
+def _run_prompt_guard(text, threshold):
+    """Run Prompt Guard 2 scan and return a normalised prediction dict."""
+    from scripts.wrappers.prompt_guard import PromptGuardWrapper
+
+    if not hasattr(_run_prompt_guard, "_wrapper"):
+        _run_prompt_guard._wrapper = PromptGuardWrapper()
+
+    result = _run_prompt_guard._wrapper.predict(text)
+    return {
+        "prediction": result["label"],
+        "score": result["score"],
+        "latency_ms": result["latency_ms"],
+        "label": "MALICIOUS" if result["label"] == 1 else "SAFE",
+    }
+
+
 _TOOL_RUNNERS = {
     "na0s": _run_na0s,
-    # Future competitor wrappers go here:
-    # "rebuff": _run_rebuff,
-    # "lakera": _run_lakera,
+    "llm_guard": _run_llm_guard,
+    "prompt_guard": _run_prompt_guard,
 }
 
 
