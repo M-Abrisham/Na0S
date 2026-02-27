@@ -190,15 +190,12 @@ BENCHMARK_RESULTS.md             # NEW - published numbers
 **Morning (4h)**
 - [x] **CP-1**: Add `to_dict()` and `to_json()` to `ScanResult` in `scan_result.py` -- DONE (2026-02-27, 19 tests)
 - [x] **CP-2**: Add `to_dict()` / `to_json()` to `OutputScanResult` in `output_scanner.py` -- DONE (2026-02-27)
-- [ ] **CP-3**: Add `threshold=0.55` parameter to `scan()` and `classify_prompt()` in `predict.py`
-  - DONE when: `scan("text", threshold=0.3)` uses 0.3 instead of hardcoded 0.55
-- [ ] **CP-4**: Add `elapsed_ms` field to `ScanResult`, measure wall-clock in `scan()`
-  - DONE when: `scan("text").elapsed_ms` returns float > 0
-- [ ] **CP-5**: Fix `evaluate_probes.py` JSON output (`_project_root` undefined)
-  - DONE when: `python scripts/evaluate_probes.py --json` produces valid JSON
+- [x] **CP-3**: Add `threshold=0.55` parameter to `scan()` and `classify_prompt()` in `predict.py` -- DONE (2026-02-27, 15 tests)
+- [x] **CP-4**: Add `elapsed_ms` field to `ScanResult`, measure wall-clock in `scan()` -- DONE (2026-02-27, 8 tests)
+- [x] **CP-5**: Fix `evaluate_probes.py` JSON output (`_project_root` undefined) -- DONE (2026-02-27)
 
 **Afternoon (4h)**
-- [ ] **CP-6**: Create `scripts/benchmark.py` -- unified benchmark harness:
+- [x] **CP-6**: Create `scripts/benchmark.py` -- unified benchmark harness: -- DONE (2026-02-27, 10/10 test dataset)
   - Loads datasets from JSONL (`{"text": "...", "label": 0|1}`)
   - Calls `scan(text)` for each sample, measures latency
   - Computes: TP, TN, FP, FN, precision, recall, F1, FPR, accuracy, AUC-ROC, AUC-PR

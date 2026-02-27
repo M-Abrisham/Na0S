@@ -62,6 +62,7 @@
 import logging
 import sqlite3
 import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,8 @@ def predict(text, vectorizer, model):
     return label, prob, l0
 
 
-def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
+def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None,
+                       threshold=DECISION_THRESHOLD):
     """Combine ML confidence, rule severity, obfuscation, and structural
     features into a composite score.
 
@@ -342,7 +344,7 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
     if (ml_safe_confidence > 0.65
             and rule_weight == 0.0
             and not has_decoded_payload):
-        composite = min(composite, DECISION_THRESHOLD - 0.01)
+        composite = min(composite, threshold - 0.01)
 
     # --- Multi-layer agreement boost ---
     # When multiple independent detection layers agree that the input
@@ -394,12 +396,12 @@ def _weighted_decision(ml_prob, ml_label, hits, obs_flags, structural=None):
     # cascade confidence) expect a normalised probability in [0, 1].
     composite = min(max(composite, 0.0), 1.0)
 
-    if composite >= DECISION_THRESHOLD:
+    if composite >= threshold:
         return "MALICIOUS", composite
     return "SAFE", composite
 
 
-def classify_prompt(text, vectorizer, model):
+def classify_prompt(text, vectorizer, model, threshold=DECISION_THRESHOLD):
     label, prob, l0 = predict(text, vectorizer, model)
 
     if l0.rejected:
@@ -476,7 +478,8 @@ def classify_prompt(text, vectorizer, model):
 
     label, composite = _weighted_decision(ml_prob=prob, ml_label=label,
                                           hits=hits, obs_flags=obs_flags,
-                                          structural=structural)
+                                          structural=structural,
+                                          threshold=threshold)
 
     # Now add obfuscation flags to hits for downstream consumers
     # (technique_tags mapping, ScanResult.rule_hits, etc.)
@@ -494,13 +497,27 @@ def classify_prompt(text, vectorizer, model):
     return label, composite, hits, l0, detailed_hits
 
 
-def scan(text, vectorizer=None, model=None):
+def scan(text, threshold=DECISION_THRESHOLD, vectorizer=None, model=None):
     """Unified entry point returning a structured ScanResult.
+
+    Parameters
+    ----------
+    text : str
+        The input text to scan.
+    threshold : float
+        Decision threshold for the composite score.  When the composite
+        score >= threshold the input is classified as malicious.
+        Defaults to ``DECISION_THRESHOLD`` (0.55).
+    vectorizer : optional
+        Pre-loaded TF-IDF vectorizer (loaded automatically if *None*).
+    model : optional
+        Pre-loaded classifier model (loaded automatically if *None*).
 
     Wraps the entire classification pipeline with a wall-clock timeout
     (``SCAN_TIMEOUT`` seconds, default 60).  If the pipeline exceeds
     this budget, returns a rejected ScanResult.
     """
+    _t0 = time.perf_counter()
     if vectorizer is None or model is None:
         vectorizer, model = predict_prompt()
 
@@ -508,11 +525,11 @@ def scan(text, vectorizer=None, model=None):
         label, prob, hits, l0, detailed_hits = with_timeout(
             classify_prompt,
             SCAN_TIMEOUT,
-            text, vectorizer, model,
+            text, vectorizer, model, threshold,
             step_name="scan_classify",
         )
     except Layer0TimeoutError:
-        return ScanResult(
+        result = ScanResult(
             sanitized_text="",
             is_malicious=True,
             risk_score=1.0,
@@ -525,9 +542,11 @@ def scan(text, vectorizer=None, model=None):
             ml_confidence=0.0,
             ml_label="blocked",
         )
+        result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
+        return result
 
     if l0.rejected:
-        return ScanResult(
+        result = ScanResult(
             sanitized_text="",
             is_malicious=True,
             risk_score=1.0,
@@ -538,6 +557,8 @@ def scan(text, vectorizer=None, model=None):
             ml_confidence=prob,
             ml_label="blocked",
         )
+        result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
+        return result
 
     is_mal = "MALICIOUS" in label
     # prob is now the composite score from weighted voting
@@ -833,10 +854,10 @@ def scan(text, vectorizer=None, model=None):
     # but chunked analysis can add +0.05-0.15 risk for confirmed hits.
     # Without this re-evaluation, a text that crosses the threshold only
     # after chunked analysis would be incorrectly labeled safe.
-    if not is_mal and risk >= DECISION_THRESHOLD:
+    if not is_mal and risk >= threshold:
         is_mal = True
 
-    return ScanResult(
+    result = ScanResult(
         sanitized_text=l0.sanitized_text,
         is_malicious=is_mal,
         risk_score=round(risk, 4),
@@ -847,6 +868,8 @@ def scan(text, vectorizer=None, model=None):
         ml_label="malicious" if "MALICIOUS" in label else "safe",
         anomaly_flags=l0.anomaly_flags,
     )
+    result.elapsed_ms = round((time.perf_counter() - _t0) * 1000, 2)
+    return result
 
 
 if __name__ == "__main__":
