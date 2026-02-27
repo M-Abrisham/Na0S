@@ -82,6 +82,9 @@ dev = [
     "PyYAML>=6.0.1,<7",
 ]
 
+[project.scripts]
+na0s = "na0s.cli:main"
+
 [project.urls]
 Repository = "https://github.com/M-Abrisham/Na0S"
 Issues = "https://github.com/M-Abrisham/Na0S/issues"

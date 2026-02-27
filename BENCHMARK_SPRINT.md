@@ -286,7 +286,7 @@ README.md                        # benchmark section
 ### Day 1B: CLI + Datasets + Makefile
 
 **Morning (4h)**
-- [ ] **CP-10**: Create `src/na0s/cli.py`:
+- [x] **CP-10**: Create `src/na0s/cli.py`: -- DONE (2026-02-27, 30 tests)
   ```
   na0s scan "text"              # scan inline text, JSON to stdout
   na0s scan -f file.txt         # scan file
