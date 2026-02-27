@@ -9,4 +9,5 @@ __pycache__/
 dist/
 build/
 .hypothesis/
-*.db
+*.dbsrc/data/fingerprints.db-shm
+src/data/fingerprints.db-wal

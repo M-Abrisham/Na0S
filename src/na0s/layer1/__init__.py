@@ -30,12 +30,5 @@ from ..layer2.numeric_decode import (  # noqa: F401
     NumericDecodeResult,
 )
 
-try:
-    from ..layer2.syllable_splitting import dehyphenate_suspicious, SplittingResult  # noqa: F401
-except ImportError:
-    pass
-
-try:
-    from ..layer2.ascii_art_detector import detect_ascii_art, AsciiArtResult  # noqa: F401
-except ImportError:
-    pass
+from ..layer2.syllable_splitting import dehyphenate_suspicious, SplittingResult  # noqa: F401
+from ..layer2.ascii_art_detector import detect_ascii_art, AsciiArtResult  # noqa: F401

@@ -223,13 +223,13 @@ Layer 1 is a regex-based signature engine that detects known attack patterns. Ha
 
 ## Layer 2: Obfuscation Detection & Decoding
 
-**Files**: `src/na0s/layer2/` (7 modules: `__init__.py`, `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py`, `ascii_art_detector.py` (stub), `syllable_splitting.py` (stub))
-**Backward-compat shims**: `src/na0s/obfuscation.py` (re-exports from layer2), `src/na0s/layer1/{morse_code,numeric_decode,whitespace_stego}.py` (re-exports from layer2)
-**Tests**: `tests/test_obfuscation.py` (3 tests), `tests/test_l2_obfuscation_fixes.py` (34 tests), `tests/test_scan_d4_encoding_obfuscation.py` (51 tests), `tests/test_matryoshka.py` (58 tests), `tests/test_morse_code.py` (88 tests), `tests/test_numeric_decode.py` (110 tests), `tests/test_whitespace_stego.py` (43 tests)
-**Status**: Restructured into `layer2/` package (2026-02-26). Detects 10+ encoding types. 2 stubs pending full implementation (ascii_art_detector, syllable_splitting — referenced in roadmap as DONE but source files never committed).
+**Files**: `src/na0s/layer2/` (7 modules: `__init__.py`, `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py`, `ascii_art_detector.py`, `syllable_splitting.py`)
+**Backward-compat shims**: `src/na0s/obfuscation.py` (re-exports from layer2), `src/na0s/layer1/{morse_code,numeric_decode,whitespace_stego,ascii_art_detector,syllable_splitting}.py` (re-exports from layer2)
+**Tests**: `tests/test_obfuscation.py` (3 tests), `tests/test_l2_obfuscation_fixes.py` (34 tests), `tests/test_scan_d4_encoding_obfuscation.py` (51 tests), `tests/test_matryoshka.py` (58 tests), `tests/test_morse_code.py` (88 tests), `tests/test_numeric_decode.py` (110 tests), `tests/test_whitespace_stego.py` (72 tests), `tests/test_ascii_art_detector.py` (115 tests), `tests/test_syllable_splitting.py` (144 tests)
+**Status**: Fully implemented `layer2/` package (2026-02-26). Detects 12+ encoding/obfuscation types. All 7 modules complete with full test coverage.
 
 ### Updated Description
-Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Now organized as a proper package at `src/na0s/layer2/`. Handles Base64, hex, URL-encoding, ROT13, leetspeak, reversed text, Morse code, binary/octal/decimal ASCII, whitespace steganography, with entropy analysis (2-of-3 composite voting), punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. Recursive Matryoshka unwrapping with encoding chain provenance tracking. **Remaining gaps**: Caesar cipher (non-13 shifts), pig-latin, full ASCII art detector implementation, full syllable-splitting implementation.
+Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-classification. Now organized as a proper package at `src/na0s/layer2/`. Handles Base64, hex, URL-encoding, ROT13, leetspeak, reversed text, Morse code, binary/octal/decimal ASCII, whitespace steganography, ASCII art detection (5-signal weighted voting, ArtPrompt defense), and syllable-splitting de-hyphenation (25 Unicode dash chars, 83 suspicious words, 63 compound whitelist), with entropy analysis (2-of-3 composite voting), punctuation flood detection, and casing transition analysis. Each decoded view is re-classified through both ML and L1 rules. Recursive Matryoshka unwrapping with encoding chain provenance tracking. **Remaining gaps**: Caesar cipher (non-13 shifts), pig-latin, combined signal boosting.
 
 ### TODO List
 
@@ -287,11 +287,12 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 **Phase 1 (P0)**: Fix entropy threshold, refactor to recursive unwrap loop, add ROT13 + reversed text detectors ✅ DONE (2026-02-20/21)
 **Phase 2 (P1)**: ~~Add leetspeak~~, Morse, binary/octal, syllable-splitting, combined signal boosting (leetspeak ✅ DONE 2026-02-21)
 **Phase 3 (P2)**: ~~Unicode tag stego~~✅ (moved to L0, 2026-02-22), ~~whitespace stego~~✅, ~~ASCII art detection~~✅ DONE (2026-02-23) — 3 first-in-class modules, 183 new tests, 8 audit fixes
-**Phase 4 (Restructuring)**: Promoted to `src/na0s/layer2/` package (2026-02-26). Moved `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` from top-level/layer1 into `layer2/`. Created stubs for `ascii_art_detector.py` and `syllable_splitting.py` (marked DONE in roadmap but source files never committed — need full implementation). Backward-compat shims at old import paths. Zero regressions: 2862 tests passing.
+**Phase 4 (Restructuring)**: Promoted to `src/na0s/layer2/` package (2026-02-26). Moved `obfuscation.py`, `morse_code.py`, `numeric_decode.py`, `whitespace_stego.py` from top-level/layer1 into `layer2/`. Backward-compat shims at old import paths. Zero regressions: 2862 tests passing.
+**Phase 5 (Full Implementation)**: Implemented `ascii_art_detector.py` (420+ lines, 5-signal weighted voting, Unicode box-drawing/braille/block detection, FP exemptions, 115 tests) and `syllable_splitting.py` (300+ lines, 25 Unicode dash chars, 83 suspicious words in 5 categories, 63 compound whitelist, 50+ safe prefixes with override exception, 144 tests). Created `test_whitespace_stego.py` (72 tests). Updated all backward-compat shims. Removed `@expectedFailure` from `test_d4_6_word_splitting` (now passes). 2955+ tests passing, zero regressions.
 
-#### REMAINING after restructuring
-- [ ] **ascii_art_detector.py full implementation** — Stub in `layer2/`, needs 5-signal weighted voting system, Unicode box-drawing detection, 67 tests. **Priority**: P1.
-- [ ] **syllable_splitting.py full implementation** — Stub in `layer2/`, needs 25 Unicode dash chars, ~75 suspicious words, ~60 compound whitelist. **Priority**: P1.
+#### REMAINING
+- [x] ~~**ascii_art_detector.py full implementation**~~ — DONE (2026-02-26). 5-signal weighted voting, Unicode detection, 115 tests.
+- [x] ~~**syllable_splitting.py full implementation**~~ — DONE (2026-02-26). 25 Unicode dashes, 83 suspicious words, 63 compound whitelist, 144 tests.
 - [ ] **FIX: Combined signal boosting missing** — Persona hijack + encoded payload in same message should carry extra weight. **Priority**: P1.
 - [ ] **Caesar cipher (non-13 shifts)** — ROT13 only covers shift=13. Full Caesar with brute-force (shifts 1-25) + dictionary validation. **Priority**: P2.
 - [ ] **Pig-latin detection** — Simple substitution cipher variant. **Priority**: P3.
@@ -300,11 +301,11 @@ Layer 2 detects encoded/obfuscated payloads and recursively decodes them for re-
 
 ## Layer 3: Structural Feature Extraction
 
-**Files**: `src/structural_features.py`
+**Files**: `src/na0s/structural_features.py`
 **Tests**: `tests/test_structural_features.py` (135 tests)
 **Status**: Implemented and WIRED into predict.py (2026-02-14) — injection signals contribute weighted scores
 
-###gnUpdated Description
+### Updated Description
 Layer 3 extracts 24 numeric features from input text that characterize prompt structure, style, and injection signals. Features span 6 groups: length metrics (3), casing patterns (3), punctuation analysis (4), structural markers (5), injection signal detection (6), and context features (3). The module is self-contained and functional (~0.3ms/sample). Wired into predict.py as of 2026-02-14 (injection signals contribute weighted scores). Returns `StructuralFeatures` dataclass with dict-like access (`[]`, `.get()`, `in`, `.keys()`, `.items()`, `.to_dict()`). Includes `normalize_features()` with soft caps for ML classifiers, abbreviation-aware sentence splitting, and apostrophe-safe quote depth.
 
 ### TODO List

@@ -680,7 +680,6 @@ class TestD4_6_PigLatinWordGames(unittest.TestCase):
             ),
         )
 
-    @unittest.expectedFailure
     def test_d4_6_word_splitting(self):
         """Word splitting / payload division.
         Source: arxiv 2406.08754 -- Exploiting Uncommon Text-Encoded Structures

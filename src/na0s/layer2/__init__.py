@@ -17,6 +17,8 @@ Public API:
   detect_octal(text)                -> NumericDecodeResult
   detect_decimal(text)              -> NumericDecodeResult
   detect_whitespace_stego(text)     -> StegoResult
+  detect_ascii_art(text)            -> AsciiArtResult
+  dehyphenate_suspicious(text)      -> SplittingResult
 """
 
 from .obfuscation import (
@@ -33,3 +35,5 @@ from .numeric_decode import (
     NumericDecodeResult,
 )
 from .whitespace_stego import detect_whitespace_stego, StegoResult
+from .ascii_art_detector import detect_ascii_art, AsciiArtResult
+from .syllable_splitting import dehyphenate_suspicious, SplittingResult
