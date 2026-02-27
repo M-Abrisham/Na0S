@@ -296,9 +296,8 @@ README.md                        # benchmark section
   ```
   - `argparse` (no extra deps), `--output-format json|csv|text`, `--threshold 0.55`
   - Exit codes: 0=safe, 1=malicious, 2=blocked/error, 3=usage error
-- [ ] Register CLI in `pyproject.toml`: `[project.scripts] na0s = "na0s.cli:main"`
-- [ ] Write 15+ tests for CLI in `tests/test_cli.py`
-  - DONE when: `pip install -e . && echo "ignore previous instructions" | na0s scan -` outputs JSON
+- [x] Register CLI in `pyproject.toml`: `[project.scripts] na0s = "na0s.cli:main"` -- DONE (2026-02-27)
+- [x] Write 15+ tests for CLI in `tests/test_cli.py` -- DONE (2026-02-27, 30 tests across 14 classes)
 
 **Afternoon (4h)**
 - [ ] **CP-11**: Download benchmark datasets:
@@ -307,16 +306,7 @@ README.md                        # benchmark section
   - `databricks/databricks-dolly-15k` (benign baseline, sample 2000)
   - Convert all to JSONL: `{"text": "...", "label": 0|1}`
   - DONE when: `data/benchmark/deepset_pi.jsonl`, `data/benchmark/benign_alpaca.jsonl`, `data/benchmark/benign_dolly.jsonl` exist
-- [ ] **CP-12**: Create `Makefile`:
-  ```
-  make install      # pip install -e ".[dev]"
-  make test         # pytest with coverage
-  make lint         # flake8
-  make bench        # full benchmark suite
-  make bench-fast   # single-dataset quick iteration
-  make build        # python -m build
-  make clean        # remove artifacts
-  ```
+- [x] **CP-12**: Create `Makefile` -- DONE (2026-02-27, 9 targets: help, install, test, lint, bench, bench-fast, build, clean, publish)
 - [ ] **CP-13**: Generate lockfile: `pip freeze > requirements-benchmark.txt`
   - DONE when: `pip install -r requirements-benchmark.txt` reproduces environment
 
@@ -653,9 +643,9 @@ These represent documented gaps that will show as misses in the benchmark. They 
 - [ ] `BENCHMARK_RESULTS.md`
 
 ### New Files (WS-B)
-- [ ] `src/na0s/cli.py`
-- [ ] `tests/test_cli.py`
-- [ ] `Makefile`
+- [x] `src/na0s/cli.py`
+- [x] `tests/test_cli.py`
+- [x] `Makefile`
 - [ ] `Dockerfile`
 - [ ] `requirements-benchmark.txt`
 - [ ] `data/benchmark/deepset_pi.jsonl`
