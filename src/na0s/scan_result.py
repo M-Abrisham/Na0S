@@ -1,5 +1,7 @@
 """Unified scan result — clean, machine-readable output from the detector."""
 
+import dataclasses
+import json
 from dataclasses import dataclass, field
 
 
@@ -20,3 +22,10 @@ class ScanResult:
                                    # "weighted", "embedding", "judge",
                                    # "positive_validation", "blocked", or ""
                                    # (empty when produced by predict.scan())
+    elapsed_ms: float = 0.0
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    def to_json(self, **kwargs) -> str:
+        return json.dumps(self.to_dict(), **kwargs)

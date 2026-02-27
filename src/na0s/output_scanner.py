@@ -13,6 +13,8 @@ filters.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import re
 import base64
 from dataclasses import dataclass, field
@@ -31,6 +33,12 @@ class OutputScanResult:
     risk_score: float          # 0.0 .. 1.0
     flags: List[str] = field(default_factory=list)
     redacted_text: str = ""
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+    def to_json(self, **kwargs) -> str:
+        return json.dumps(self.to_dict(), **kwargs)
 
 
 # ---------------------------------------------------------------------------

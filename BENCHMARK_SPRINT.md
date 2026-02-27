@@ -188,10 +188,8 @@ BENCHMARK_RESULTS.md             # NEW - published numbers
 ### Day 1A: Foundation + Benchmark Harness + Baseline Numbers
 
 **Morning (4h)**
-- [ ] **CP-1**: Add `to_dict()` and `to_json()` to `ScanResult` in `scan_result.py`
-  - DONE when: `from na0s import scan; json.loads(scan("hello").to_json())` works
-- [ ] **CP-2**: Add `to_dict()` / `to_json()` to `OutputScanResult` in `output_scanner.py`
-  - DONE when: `scan_output(...).to_json()` works
+- [x] **CP-1**: Add `to_dict()` and `to_json()` to `ScanResult` in `scan_result.py` -- DONE (2026-02-27, 19 tests)
+- [x] **CP-2**: Add `to_dict()` / `to_json()` to `OutputScanResult` in `output_scanner.py` -- DONE (2026-02-27)
 - [ ] **CP-3**: Add `threshold=0.55` parameter to `scan()` and `classify_prompt()` in `predict.py`
   - DONE when: `scan("text", threshold=0.3)` uses 0.3 instead of hardcoded 0.55
 - [ ] **CP-4**: Add `elapsed_ms` field to `ScanResult`, measure wall-clock in `scan()`
