@@ -22,6 +22,7 @@ import time
 
 # Path setup — scripts/taxonomy/ needs to be importable
 _script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
 sys.path.insert(0, _script_dir)
 
 from taxonomy import ALL_PROBES
